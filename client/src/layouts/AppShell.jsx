@@ -23,7 +23,7 @@ export default function AppShell() {
             </span>
             <span>
               <span className="brand-title">RouteWise</span>
-              <span className="brand-tagline">Smart Travel Planning • PERN Stack</span>
+              <span className="brand-tagline">Smart Travel Planning </span>
             </span>
           </NavLink>
 

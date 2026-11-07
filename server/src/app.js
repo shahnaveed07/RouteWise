@@ -1,5 +1,6 @@
 import express from 'express';
 import healthRoutes from './routes/healthRoutes.js';
+import tripRoutes from './routes/tripRoutes.js';
 import { requireAuth } from './middleware/auth.js';
 
 const app = express();
@@ -13,13 +14,12 @@ app.use('/api/health', healthRoutes);
 app.get('/api/auth/me', requireAuth, (req, res) => {
   res.status(200).json({
     authenticated: true,
-    user: req.dbUser || {
-      uid: req.user.uid,
-      email: req.user.email || null,
-      fullName: req.user.name || null,
-    },
+    user: req.dbUser,
   });
 });
+
+// Protected Trip CRUD endpoints
+app.use('/api/trips', tripRoutes);
 
 // 404 handler for unknown /api/* endpoints
 app.use('/api', (req, res) => {
@@ -28,12 +28,19 @@ app.use('/api', (req, res) => {
   });
 });
 
-// Centralized API error handler (never leaks raw SQL or stack traces)
+// Centralized API error handler (never leaks raw SQL, hostnames, credentials, or stack traces)
 app.use((err, _req, res, _next) => {
-  console.error('Unhandled API error:', err);
-  const statusCode = err.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
+  console.error('Unhandled API error:', err.message || err);
+  const statusCode =
+    err.statusCode && Number.isInteger(err.statusCode) && err.statusCode >= 400 && err.statusCode < 600
+      ? err.statusCode
+      : 500;
+  const safeMessage =
+    statusCode === 500
+      ? 'Internal server error. Please try again later.'
+      : err.message || 'Request could not be completed.';
   res.status(statusCode).json({
-    error: statusCode === 500 ? 'Internal server error. Please try again later.' : err.message,
+    error: safeMessage,
   });
 });
 

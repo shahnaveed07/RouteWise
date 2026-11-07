@@ -2,38 +2,82 @@ import { adminAuth } from '../config/firebase-admin.js';
 import { getOrCreateUser } from '../services/userService.js';
 
 /**
- * Verifies a real Firebase ID token from the Authorization Bearer header
- * and synchronizes the authenticated user record in PostgreSQL.
- * Explicitly rejects missing tokens, malformed headers, or unauthenticated demo persona IDs.
+ * Factory for the authentication middleware to support deterministic unit testing
+ * of token verification failures (401) vs. PostgreSQL synchronization failures (503).
+ * Never logs or returns raw bearer tokens.
  */
-export const requireAuth = async (req, res, next) => {
-  const authHeader = req.headers?.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing Bearer token' });
-  }
+export function createRequireAuth({
+  verifyToken = (token) => adminAuth.verifyIdToken(token),
+  syncUser = getOrCreateUser,
+} = {}) {
+  return async function requireAuthMiddleware(req, res, next) {
+    const authHeader = req.headers?.authorization;
+    if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        error: 'Unauthorized: Missing or invalid Bearer token.',
+      });
+    }
 
-  const token = authHeader.split('Bearer ')[1]?.trim();
-  if (!token || token.startsWith('demo-')) {
-    return res.status(401).json({
-      error: 'Unauthorized: Demo preview personas are not authenticated tokens',
-    });
-  }
+    const token = authHeader.slice('Bearer '.length).trim();
+    if (!token) {
+      return res.status(401).json({
+        error: 'Unauthorized: Missing or invalid Bearer token.',
+      });
+    }
 
-  try {
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    req.user = decodedToken;
+    if (token.startsWith('demo-')) {
+      return res.status(401).json({
+        error: 'Unauthorized: Demo preview personas are not authenticated tokens.',
+      });
+    }
 
-    if (decodedToken.uid && decodedToken.email) {
-      req.dbUser = await getOrCreateUser(
+    let decodedToken;
+    try {
+      decodedToken = await verifyToken(token);
+    } catch (_tokenError) {
+      return res.status(401).json({
+        error: 'Unauthorized: Invalid or expired authentication token.',
+      });
+    }
+
+    if (!decodedToken || !decodedToken.uid || !decodedToken.email) {
+      return res.status(401).json({
+        error: 'Unauthorized: Token is missing required identity claims (uid, email).',
+      });
+    }
+
+    req.user = {
+      uid: decodedToken.uid,
+      email: decodedToken.email,
+      name: decodedToken.name || '',
+    };
+
+    try {
+      const dbUser = await syncUser(
         decodedToken.uid,
         decodedToken.email,
         decodedToken.name || ''
       );
+      if (!dbUser || !dbUser.id) {
+        const syncErr = new Error(
+          'Service temporarily unavailable: User synchronization returned no record.'
+        );
+        syncErr.statusCode = 503;
+        return next(syncErr);
+      }
+      req.dbUser = dbUser;
+      return next();
+    } catch (dbError) {
+      if (dbError.statusCode === 401) {
+        return res.status(401).json({ error: dbError.message });
+      }
+      const safeError = new Error(
+        'Service temporarily unavailable: Unable to synchronize user account.'
+      );
+      safeError.statusCode = dbError.statusCode || 503;
+      return next(safeError);
     }
+  };
+}
 
-    return next();
-  } catch (error) {
-    console.error('Error verifying Firebase ID token:', error);
-    return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
-  }
-};
+export const requireAuth = createRequireAuth();

@@ -4,12 +4,20 @@ import { query } from '../config/db.js';
  * Synchronizes an authenticated user into the PostgreSQL users table using
  * an idempotent ON CONFLICT (uid) DO UPDATE query.
  */
-export async function getOrCreateUser(uid, email, fullName) {
+export async function getOrCreateUser(uid, email, fullName, queryFn = query) {
+  const normalizedUid = String(uid || '').trim();
   const normalizedEmail = String(email || '').trim().toLowerCase();
+
+  if (!normalizedUid || !normalizedEmail) {
+    const validationErr = new Error('Authenticated token is missing required uid or email claims.');
+    validationErr.statusCode = 401;
+    throw validationErr;
+  }
+
   const resolvedName =
     fullName && String(fullName).trim().length > 0
-      ? String(fullName).trim()
-      : normalizedEmail.split('@')[0] || 'RouteWise Traveller';
+      ? String(fullName).trim().slice(0, 100)
+      : (normalizedEmail.split('@')[0] || 'RouteWise Traveller').slice(0, 100);
 
   const sql = `
     INSERT INTO users (uid, email, full_name, updated_at)
@@ -23,12 +31,16 @@ export async function getOrCreateUser(uid, email, fullName) {
   `;
 
   try {
-    const result = await query(sql, [uid, normalizedEmail, resolvedName]);
+    const result = await queryFn(sql, [normalizedUid, normalizedEmail, resolvedName]);
     return result.rows[0];
   } catch (error) {
-    console.error('Database user synchronization failed:', error);
-    throw new Error('Unable to synchronize user account. Please try again later.', {
-      cause: error,
-    });
+    console.error('Database user synchronization failed:', error.message);
+    const dbError = new Error(
+      'Service temporarily unavailable: Unable to synchronize user account in database.',
+      { cause: error }
+    );
+    dbError.statusCode = 503;
+    dbError.code = 'DB_USER_SYNC_FAILED';
+    throw dbError;
   }
 }
