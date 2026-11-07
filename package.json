@@ -1,0 +1,29 @@
+{
+  "name": "routewise",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node server/server.js",
+    "build": "vite build",
+    "start": "NODE_ENV=production node server/server.js",
+    "preview": "vite preview",
+    "clean": "rm -rf dist",
+    "lint": "node --check server/server.js && node --check server/src/app.js && node --check server/src/config/db.js && node --check server/src/middleware/auth.js && node --check server/src/services/userService.js"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "firebase": "^13.2.0",
+    "firebase-admin": "^14.5.0",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.546.0",
+    "pg": "^8.23.1",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "react-router-dom": "^7.18.5",
+    "vite": "^8.3.0",
+    "zod": "^4.6.7"
+  }
+}

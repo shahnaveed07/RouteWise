@@ -1,0 +1,50 @@
+ROUTEWISE | START HERE
+======================
+
+Current baseline: v0.3 SQL / PERN
+Project status: Planning baseline only. No application implementation is claimed as complete.
+
+WHAT EACH FILE IS
+-----------------
+1) docs/ROUTEWISE_PROJECT_NOTEBOOK.md
+   The primary editable living notebook and source of truth.
+   AI Studio must keep updating this file inside the project after each approved phase.
+
+2) prompts/RouteWise_AIStudio_MasterPrompt.txt
+   Paste this into Google AI Studio after opening the RouteWise project workspace.
+   It instructs the coding agent to inspect the current workspace and do Phase 0 ONLY.
+   Do not ask it to build all phases in one go.
+
+3) docs/RouteWise_Project_Notebook_v0.3_SQL.docx
+   Human-readable Word export for review and editing.
+
+4) docs/RouteWise_Project_Notebook_v0.3_SQL.pdf
+   Read-only review/export copy.
+
+5) docs/RouteWise_Project_Notebook_v0.3_SQL.pptx
+   Simple academic PowerPoint notebook overview and final-submission reference.
+
+RECOMMENDED FIRST STEPS IN GOOGLE AI STUDIO
+-------------------------------------------
+1) Open/create the RouteWise coding workspace.
+2) Put docs/ROUTEWISE_PROJECT_NOTEBOOK.md in the workspace at exactly that path.
+3) Paste prompts/RouteWise_AIStudio_MasterPrompt.txt into the coding agent.
+4) Let it perform Phase 0 only: inspect files, report the actual state, identify blockers and decisions.
+5) Review the report. Do not proceed until the starting-state report is honest and clear.
+6) Then explicitly ask it to proceed with Phase 1. Continue one phase at a time.
+7) After every phase, verify that docs/ROUTEWISE_PROJECT_NOTEBOOK.md was updated with real file paths, components, migrations, tests and evidence.
+
+TECHNICAL BASELINE
+------------------
+- SQL instead of MongoDB is confirmed.
+- PostgreSQL is the recommended SQL engine, pending Phase 0 environment confirmation.
+- PostgreSQL + Express + React + Node is PERN (not MERN).
+- Prisma ORM and Prisma Migrate are proposed, pending Phase 0 compatibility confirmation.
+- No paid API/service is assumed. Free tiers and provider terms must be checked before use.
+- ₹0 is a target, not a guarantee of permanent free hosting or unlimited API usage.
+
+DOCUMENTATION RULE
+------------------
+The Markdown notebook inside the code project is the source of truth. DOCX/PDF/PPT are exports for people and academic submission. Refresh those exports from the Markdown notebook near milestones and final submission.
+
+Do not claim planned items are implemented. Do not claim tests passed unless they actually ran and the results are recorded.

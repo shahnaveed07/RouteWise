@@ -1,0 +1,6 @@
+{
+  "name": "RouteWise — Smart Travel Planning",
+  "description": "Organize trips in one workspace with day-wise itineraries, destination maps, weather lookups, budgets, expenses, and group expense splits.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

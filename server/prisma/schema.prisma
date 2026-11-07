@@ -1,0 +1,153 @@
+// RouteWise — PostgreSQL Relational Schema (Prisma ORM)
+// Database: PostgreSQL (Cloud SQL Developer Edition)
+// Stack: PERN (PostgreSQL, Express.js, React.js, Node.js)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  uid           String         @unique @db.VarChar(128)
+  fullName      String         @map("full_name") @db.VarChar(100)
+  email         String         @unique @db.VarChar(255)
+  passwordHash  String?        @map("password_hash") @db.VarChar(255)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ownedTrips    Trip[]         @relation("TripOwner")
+  memberships   TripMember[]
+  paidExpenses  Expense[]      @relation("ExpensePayer")
+  addedExpenses Expense[]      @relation("ExpenseCreator")
+  expenseSplits ExpenseSplit[]
+
+  @@map("users")
+}
+
+model Trip {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerUserId     String         @map("owner_user_id") @db.Uuid
+  title           String         @db.VarChar(150)
+  destinationName String         @map("destination_name") @db.VarChar(180)
+  description     String?        @db.Text
+  startDate       DateTime       @map("start_date") @db.Date
+  endDate         DateTime       @map("end_date") @db.Date
+  currency        String         @default("INR") @db.Char(3)
+  plannedBudget   Decimal        @default(0.00) @map("planned_budget") @db.Decimal(12, 2)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  owner           User           @relation("TripOwner", fields: [ownerUserId], references: [id])
+  members         TripMember[]
+  itineraryDays   ItineraryDay[]
+  expenses        Expense[]
+
+  @@index([ownerUserId, updatedAt], map: "idx_trips_owner_updated")
+  @@map("trips")
+}
+
+model TripMember {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId           String    @map("trip_id") @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  role             String    @default("member") @db.VarChar(20)
+  membershipStatus String    @default("active") @map("membership_status") @db.VarChar(20)
+  joinedAt         DateTime? @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  trip             Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user             User      @relation(fields: [userId], references: [id])
+
+  @@unique([tripId, userId], map: "uq_trip_members_trip_user")
+  @@map("trip_members")
+}
+
+model ItineraryDay {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId    String          @map("trip_id") @db.Uuid
+  dayDate   DateTime        @map("day_date") @db.Date
+  dayOrder  Int             @map("day_order")
+  notes     String?         @db.Text
+
+  trip      Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  items     ItineraryItem[]
+
+  @@unique([tripId, dayDate], map: "uq_itinerary_days_trip_date")
+  @@unique([tripId, dayOrder], map: "uq_itinerary_days_trip_order")
+  @@map("itinerary_days")
+}
+
+model Place {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider        String?         @db.VarChar(40)
+  providerPlaceId String?         @map("provider_place_id") @db.VarChar(180)
+  name            String          @db.VarChar(180)
+  address         String?         @db.Text
+  latitude        Decimal?        @db.Decimal(9, 6)
+  longitude       Decimal?        @db.Decimal(9, 6)
+
+  itineraryItems  ItineraryItem[]
+
+  @@unique([provider, providerPlaceId], map: "uq_places_provider_id")
+  @@map("places")
+}
+
+model ItineraryItem {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itineraryDayId String       @map("itinerary_day_id") @db.Uuid
+  placeId        String?      @map("place_id") @db.Uuid
+  title          String       @db.VarChar(180)
+  description    String?      @db.Text
+  startTime      DateTime?    @map("start_time") @db.Time(6)
+  endTime        DateTime?    @map("end_time") @db.Time(6)
+  estimatedCost  Decimal      @default(0.00) @map("estimated_cost") @db.Decimal(12, 2)
+  sortOrder      Int          @map("sort_order")
+
+  day            ItineraryDay @relation(fields: [itineraryDayId], references: [id], onDelete: Cascade)
+  place          Place?       @relation(fields: [placeId], references: [id], onDelete: SetNull)
+
+  @@unique([itineraryDayId, sortOrder], map: "uq_itinerary_items_day_order")
+  @@map("itinerary_items")
+}
+
+model Expense {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId          String         @map("trip_id") @db.Uuid
+  paidByUserId    String         @map("paid_by_user_id") @db.Uuid
+  createdByUserId String         @map("created_by_user_id") @db.Uuid
+  title           String         @db.VarChar(180)
+  amount          Decimal        @db.Decimal(12, 2)
+  category        String         @db.VarChar(50)
+  expenseDate     DateTime       @map("expense_date") @db.Date
+  notes           String?        @db.Text
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  trip            Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  payer           User           @relation("ExpensePayer", fields: [paidByUserId], references: [id])
+  creator         User           @relation("ExpenseCreator", fields: [createdByUserId], references: [id])
+  splits          ExpenseSplit[]
+
+  @@index([tripId, expenseDate], map: "idx_expenses_trip_date")
+  @@map("expenses")
+}
+
+model ExpenseSplit {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  expenseId   String   @map("expense_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  shareAmount Decimal  @map("share_amount") @db.Decimal(12, 2)
+  isSettled   Boolean  @default(false) @map("is_settled")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  expense     Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@unique([expenseId, userId], map: "uq_expense_splits_expense_user")
+  @@map("expense_splits")
+}
