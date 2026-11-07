@@ -3,7 +3,7 @@
  * Attaches a verified Firebase ID token to protected requests and normalizes errors.
  * Never sends protected requests when a demo preview persona is active (`token === null`).
  */
-export async function apiRequest(path, { method = 'GET', body, getAccessToken } = {}) {
+export async function apiRequest(path, { method = 'GET', body, getAccessToken, signal } = {}) {
   const headers = {
     Accept: 'application/json',
   };
@@ -31,8 +31,12 @@ export async function apiRequest(path, { method = 'GET', body, getAccessToken } 
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal,
     });
-  } catch (_networkError) {
+  } catch (networkError) {
+    if (networkError && networkError.name === 'AbortError') {
+      throw networkError;
+    }
     const netErr = new Error(
       'Unable to reach the RouteWise server. Please check your connection and try again.'
     );

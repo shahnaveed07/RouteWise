@@ -250,20 +250,90 @@ test('locationController and weatherController return 400 on bad params and 200 
   assert.equal(okWeatherRes.body.weather.current.temperature, 15);
 });
 
-test('live Open-Meteo Geocoding and Forecast APIs return real normalized data for Srinagar', async () => {
-  const geoResults = await searchLocations('Srinagar', 5);
-  assert.ok(Array.isArray(geoResults));
-  assert.ok(geoResults.length > 0, 'Expected at least one geocoding result for Srinagar');
+test('weatherService and geocodingService caches isolate distinct coordinates and queries deterministically (mocked)', async () => {
+  clearGeocodingCache();
+  clearWeatherCache();
 
-  const first = geoResults[0];
-  assert.equal(typeof first.latitude, 'number');
-  assert.equal(typeof first.longitude, 'number');
-  assert.ok(first.displayName.includes('Srinagar'));
+  let weatherFetchCalls = 0;
+  const mockFetchByCoord = async (urlStr) => {
+    weatherFetchCalls += 1;
+    const parsedUrl = new URL(urlStr);
+    const lat = Number(parsedUrl.searchParams.get('latitude'));
+    const temp = lat > 34.1 ? 6.2 : 17.5;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        timezone: 'Asia/Kolkata',
+        current: {
+          time: '2026-11-07T12:00',
+          temperature_2m: temp,
+          apparent_temperature: temp - 1,
+          relative_humidity_2m: 50,
+          precipitation: 0,
+          weather_code: 0,
+          wind_speed_10m: 5,
+        },
+        daily: {
+          time: ['2026-11-07'],
+          weather_code: [0],
+          temperature_2m_max: [temp + 2],
+          temperature_2m_min: [temp - 4],
+          precipitation_probability_max: [0],
+        },
+      }),
+    };
+  };
 
-  const forecast = await getForecastByCoordinates(first.latitude, first.longitude);
-  assert.ok(forecast.current);
-  assert.equal(typeof forecast.current.temperature, 'number');
-  assert.ok(Array.isArray(forecast.daily));
-  assert.ok(forecast.daily.length > 0);
-  assert.equal(forecast.attribution.url, 'https://open-meteo.com/');
+  const srinagarWeather = await getForecastByCoordinates(34.083656, 74.797371, {
+    fetchFn: mockFetchByCoord,
+    useCache: true,
+  });
+  const srinagarCached = await getForecastByCoordinates(34.083656, 74.797371, {
+    fetchFn: mockFetchByCoord,
+    useCache: true,
+  });
+  const lehWeather = await getForecastByCoordinates(34.152588, 77.577049, {
+    fetchFn: mockFetchByCoord,
+    useCache: true,
+  });
+
+  assert.equal(weatherFetchCalls, 2);
+  assert.equal(srinagarWeather.current.temperature, 17.5);
+  assert.equal(srinagarCached.current.temperature, 17.5);
+  assert.equal(lehWeather.current.temperature, 6.2);
+  assert.notEqual(
+    srinagarWeather.coordinates.latitude,
+    lehWeather.coordinates.latitude
+  );
 });
+
+test(
+  'live Open-Meteo Geocoding and Forecast APIs return real normalized data for Srinagar',
+  {
+    skip:
+      process.env.RUN_LIVE_PROVIDER_TESTS !== '1'
+        ? 'Opt-in live provider smoke test (run via npm run test:providers or RUN_LIVE_PROVIDER_TESTS=1)'
+        : false,
+  },
+  async () => {
+    clearGeocodingCache();
+    clearWeatherCache();
+
+    const geoResults = await searchLocations('Srinagar', 5);
+    assert.ok(Array.isArray(geoResults));
+    assert.ok(geoResults.length > 0, 'Expected at least one geocoding result for Srinagar');
+
+    const first = geoResults[0];
+    assert.equal(typeof first.latitude, 'number');
+    assert.equal(typeof first.longitude, 'number');
+    assert.ok(first.displayName.includes('Srinagar'));
+
+    const forecast = await getForecastByCoordinates(first.latitude, first.longitude);
+    assert.ok(forecast.current);
+    assert.equal(typeof forecast.current.temperature, 'number');
+    assert.ok(Array.isArray(forecast.daily));
+    assert.ok(forecast.daily.length > 0);
+    assert.equal(forecast.attribution.url, 'https://open-meteo.com/');
+  }
+);

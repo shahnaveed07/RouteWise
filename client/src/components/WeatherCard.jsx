@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { hasValidCoordinates } from '../services/mapConfig.jsx';
 import { fetchDestinationWeather } from '../services/weatherService.jsx';
@@ -15,39 +15,108 @@ const WEATHER_ICON_SYMBOL = Object.freeze({
   thunderstorm: '⛈️',
 });
 
+export function buildCoordinateWeatherKey(latitude, longitude) {
+  if (!hasValidCoordinates(latitude, longitude)) {
+    return null;
+  }
+  return `${Number(latitude).toFixed(4)},${Number(longitude).toFixed(4)}`;
+}
+
 export default function WeatherCard({ latitude, longitude, destinationName }) {
   const { getAccessToken, isAuthenticated } = useAuth();
-  const [weather, setWeather] = useState(null);
+  const [weatherState, setWeatherState] = useState({
+    coordKey: null,
+    data: null,
+  });
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [errorState, setErrorState] = useState({
+    coordKey: null,
+    message: null,
+  });
+
+  const requestSeqRef = useRef(0);
+  const abortControllerRef = useRef(null);
 
   const coordsValid = hasValidCoordinates(latitude, longitude);
+  const currentCoordKey = buildCoordinateWeatherKey(latitude, longitude);
+
+  const cancelPendingWeatherRequest = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      cancelPendingWeatherRequest();
+    };
+  }, [cancelPendingWeatherRequest]);
 
   const loadWeather = useCallback(async () => {
-    if (!coordsValid || !isAuthenticated) {
-      setWeather(null);
-      setError(null);
+    cancelPendingWeatherRequest();
+
+    if (!coordsValid || !currentCoordKey || !isAuthenticated) {
+      requestSeqRef.current += 1;
+      setWeatherState({ coordKey: null, data: null });
+      setErrorState({ coordKey: null, message: null });
       setIsLoading(false);
       return;
     }
 
+    const requestId = ++requestSeqRef.current;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    // Clear weather from any different coordinate pair immediately so previous destination's
+    // weather is never displayed under the new destination.
+    setWeatherState((prev) =>
+      prev.coordKey === currentCoordKey ? prev : { coordKey: currentCoordKey, data: null }
+    );
+    setErrorState({ coordKey: currentCoordKey, message: null });
     setIsLoading(true);
-    setError(null);
+
     try {
-      const data = await fetchDestinationWeather(getAccessToken, latitude, longitude);
-      setWeather(data);
+      const data = await fetchDestinationWeather(getAccessToken, latitude, longitude, {
+        signal: controller.signal,
+      });
+      if (requestSeqRef.current === requestId && !controller.signal.aborted) {
+        setWeatherState({
+          coordKey: currentCoordKey,
+          data,
+        });
+        setErrorState({ coordKey: currentCoordKey, message: null });
+      }
     } catch (err) {
-      setError(err.message || 'Destination weather forecast is currently unavailable.');
+      if (err && err.name === 'AbortError') {
+        return;
+      }
+      if (requestSeqRef.current === requestId && !controller.signal.aborted) {
+        setErrorState({
+          coordKey: currentCoordKey,
+          message: err.message || 'Destination weather forecast is currently unavailable.',
+        });
+      }
     } finally {
-      setIsLoading(false);
+      if (requestSeqRef.current === requestId && !controller.signal.aborted) {
+        setIsLoading(false);
+      }
     }
-  }, [coordsValid, isAuthenticated, getAccessToken, latitude, longitude]);
+  }, [
+    cancelPendingWeatherRequest,
+    coordsValid,
+    currentCoordKey,
+    isAuthenticated,
+    getAccessToken,
+    latitude,
+    longitude,
+  ]);
 
   useEffect(() => {
     loadWeather();
   }, [loadWeather]);
 
-  if (!coordsValid) {
+  if (!coordsValid || !currentCoordKey) {
     return (
       <div className="weather-empty-state" role="region" aria-label="Destination weather unavailable">
         <p className="weather-empty-title">Weather Forecast Unavailable</p>
@@ -59,19 +128,25 @@ export default function WeatherCard({ latitude, longitude, destinationName }) {
     );
   }
 
-  if (isLoading && !weather) {
+  // Only render weather or error if it belongs to the currently active coordinate pair
+  const activeWeather =
+    weatherState.coordKey === currentCoordKey ? weatherState.data : null;
+  const activeError =
+    errorState.coordKey === currentCoordKey ? errorState.message : null;
+
+  if (isLoading && !activeWeather) {
     return (
       <div className="weather-loading-state" role="status" aria-live="polite">
-        Loading live weather forecast from Open-Meteo...
+        Loading live weather forecast from Open-Meteo for {destinationName || 'selected destination'}...
       </div>
     );
   }
 
-  if (error && !weather) {
+  if (activeError && !activeWeather) {
     return (
       <div className="weather-error-state" role="alert">
         <p className="weather-empty-title">Weather Service Temporarily Unavailable</p>
-        <p className="weather-empty-text">{error}</p>
+        <p className="weather-empty-text">{activeError}</p>
         <button type="button" className="btn btn-secondary btn-sm" onClick={loadWeather}>
           Retry Weather Lookup
         </button>
@@ -79,18 +154,24 @@ export default function WeatherCard({ latitude, longitude, destinationName }) {
     );
   }
 
-  if (!weather || !weather.current) {
+  if (!activeWeather || !activeWeather.current) {
     return null;
   }
 
-  const { current, daily = [], attribution } = weather;
+  const { current, daily = [], attribution } = activeWeather;
   const iconSymbol = WEATHER_ICON_SYMBOL[current.conditionIcon] || '☁️';
 
   return (
-    <div className="weather-card-content" role="region" aria-label={`Weather for ${destinationName}`}>
-      {error && (
+    <div
+      className="weather-card-content"
+      role="region"
+      aria-label={`Weather for ${destinationName}`}
+      data-testid="weather-card-content"
+      data-coord-key={currentCoordKey}
+    >
+      {activeError && (
         <div className="weather-stale-banner" role="status">
-          <span>Showing cached weather snapshot ({error})</span>
+          <span>Showing cached weather snapshot ({activeError})</span>
           <button type="button" className="btn btn-secondary btn-sm" onClick={loadWeather}>
             Refresh
           </button>
@@ -103,7 +184,7 @@ export default function WeatherCard({ latitude, longitude, destinationName }) {
             {iconSymbol}
           </span>
           <div>
-            <div className="weather-temp-main">
+            <div className="weather-temp-main" data-testid="weather-current-temp">
               {current.temperature !== null ? `${current.temperature}${current.temperatureUnit}` : '—'}
             </div>
             <div className="weather-condition-label">{current.conditionLabel}</div>
@@ -144,7 +225,7 @@ export default function WeatherCard({ latitude, longitude, destinationName }) {
 
       {daily.length > 0 && (
         <div className="weather-daily-section">
-          <h4 className="weather-daily-heading">5-Day Outlook ({weather.timezone})</h4>
+          <h4 className="weather-daily-heading">5-Day Outlook ({activeWeather.timezone})</h4>
           <div className="weather-daily-grid">
             {daily.map((day) => (
               <div key={day.date} className="weather-day-item">

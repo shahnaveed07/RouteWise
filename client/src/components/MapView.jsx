@@ -60,6 +60,11 @@ export default function MapView({
     setTileError(false);
 
     if (!mapInstanceRef.current) {
+      // Defensive guard against stale Leaflet container ID on rapid remount
+      if (containerRef.current._leaflet_id) {
+        containerRef.current._leaflet_id = null;
+      }
+
       const map = L.map(containerRef.current, {
         center: [numericLat, numericLon],
         zoom: MAP_CONFIG.defaultZoom,
@@ -72,6 +77,10 @@ export default function MapView({
       const tileLayer = L.tileLayer(MAP_CONFIG.tileUrlTemplate, {
         attribution: MAP_CONFIG.attributionHtml,
         maxZoom: MAP_CONFIG.maxZoom,
+      });
+
+      tileLayer.on('tileload', () => {
+        setTileError(false);
       });
 
       tileLayer.on('tileerror', () => {
@@ -90,15 +99,11 @@ export default function MapView({
 
       mapInstanceRef.current = map;
       markerRef.current = marker;
-
-      requestAnimationFrame(() => {
-        if (mapInstanceRef.current) {
-          mapInstanceRef.current.invalidateSize();
-        }
-      });
     } else {
       const map = mapInstanceRef.current;
-      map.setView([numericLat, numericLon], map.getZoom() || MAP_CONFIG.defaultZoom);
+      map.setView([numericLat, numericLon], map.getZoom() || MAP_CONFIG.defaultZoom, {
+        animate: false,
+      });
 
       if (markerRef.current) {
         markerRef.current.setLatLng([numericLat, numericLon]);
@@ -107,20 +112,35 @@ export default function MapView({
         );
         markerRef.current.openPopup();
       }
-      map.invalidateSize();
     }
+
+    const rafId = requestAnimationFrame(() => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+      }
+    });
+
+    const settleTimerId = setTimeout(() => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+      }
+    }, 120);
 
     let resizeObserver = null;
     if (typeof window !== 'undefined' && 'ResizeObserver' in window && containerRef.current) {
       resizeObserver = new window.ResizeObserver(() => {
-        if (mapInstanceRef.current) {
-          mapInstanceRef.current.invalidateSize();
-        }
+        requestAnimationFrame(() => {
+          if (mapInstanceRef.current) {
+            mapInstanceRef.current.invalidateSize();
+          }
+        });
       });
       resizeObserver.observe(containerRef.current);
     }
 
     return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(settleTimerId);
       if (resizeObserver) {
         resizeObserver.disconnect();
       }

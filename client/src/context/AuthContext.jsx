@@ -18,6 +18,7 @@ const DEV_E2E_TOKEN = 'e2e-local-playwright-token';
 
 function isDevLoopbackE2EEnabled() {
   if (typeof window === 'undefined') return false;
+  if (import.meta.env && import.meta.env.PROD) return false;
   const host = window.location?.hostname || '';
   const isLocal = host === 'localhost' || host === '127.0.0.1';
   try {
@@ -65,25 +66,16 @@ export const DEMO_TRAVELLERS = [
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [currentUser, setCurrentUser] = useState(() => {
-    if (isDevLoopbackE2EEnabled()) {
-      return {
-        id: 'e2e-playwright-verifier',
-        fullName: 'RouteWise E2E Verifier',
-        email: 'e2e.verifier@routewise.test',
-        roleLabel: 'Authenticated E2E Session',
-        isDemo: false,
-        isAuthenticated: true,
-        authMode: 'dev_e2e',
-      };
-    }
-    return DEMO_TRAVELLERS[0];
-  });
+  const [currentUser, setCurrentUser] = useState(DEMO_TRAVELLERS[0]);
   const [authReady, setAuthReady] = useState(false);
   const [authError, setAuthError] = useState(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    let isCancelled = false;
+
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (isCancelled) return;
+
       if (firebaseUser) {
         setCurrentUser({
           id: firebaseUser.uid,
@@ -94,22 +86,52 @@ export function AuthProvider({ children }) {
           isAuthenticated: true,
           authMode: 'firebase',
         });
-      } else if (isDevLoopbackE2EEnabled()) {
-        setCurrentUser({
-          id: 'e2e-playwright-verifier',
-          fullName: 'RouteWise E2E Verifier',
-          email: 'e2e.verifier@routewise.test',
-          roleLabel: 'Authenticated E2E Session',
-          isDemo: false,
-          isAuthenticated: true,
-          authMode: 'dev_e2e',
-        });
-      } else {
-        setCurrentUser((prev) => (prev.isDemo ? prev : DEMO_TRAVELLERS[0]));
+        setAuthReady(true);
+        return;
       }
-      setAuthReady(true);
+
+      if (isDevLoopbackE2EEnabled()) {
+        try {
+          const res = await fetch('/api/auth/me', {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              Authorization: `Bearer ${DEV_E2E_TOKEN}`,
+            },
+          });
+          if (!isCancelled && res.ok) {
+            setCurrentUser({
+              id: 'e2e-playwright-verifier',
+              fullName: 'RouteWise E2E Verifier',
+              email: 'e2e.verifier@routewise.test',
+              roleLabel: 'Authenticated E2E Session',
+              isDemo: false,
+              isAuthenticated: true,
+              authMode: 'dev_e2e',
+            });
+            setAuthReady(true);
+            return;
+          }
+        } catch (_err) {
+          // Server rejected or unreachable; fall back to unauthenticated demo mode
+        }
+        try {
+          window.localStorage.removeItem(DEV_E2E_STORAGE_KEY);
+        } catch (_ignore) {
+          // ignore storage error
+        }
+      }
+
+      if (!isCancelled) {
+        setCurrentUser((prev) => (prev.isDemo ? prev : DEMO_TRAVELLERS[0]));
+        setAuthReady(true);
+      }
     });
-    return () => unsubscribe();
+
+    return () => {
+      isCancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   const selectDemoTraveller = useCallback((travellerId) => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { searchDestinationLocations } from '../services/locationService.jsx';
 import { hasValidCoordinates } from '../services/mapConfig.jsx';
@@ -12,6 +12,7 @@ export default function DestinationSearch({
   error = null,
   inputId = 'trip-destination',
   label = 'Destination',
+  autoSearchOnMount = false,
 }) {
   const { getAccessToken, isAuthenticated } = useAuth();
   const [results, setResults] = useState([]);
@@ -19,75 +20,122 @@ export default function DestinationSearch({
   const [searchError, setSearchError] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
 
   const debounceTimerRef = useRef(null);
-  const latestQueryRef = useRef('');
+  const requestSeqRef = useRef(0);
+  const abortControllerRef = useRef(null);
+  const didAutoSearchRef = useRef(false);
 
   const coordsConfirmed = hasValidCoordinates(latitude, longitude);
+  const listboxId = `${inputId}-listbox`;
+
+  const cancelPendingSearch = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
+      cancelPendingSearch();
     };
-  }, []);
+  }, [cancelPendingSearch]);
 
-  const triggerGeocodingSearch = async (queryText) => {
-    const trimmed = queryText.trim();
-    if (trimmed.length < 3 || !isAuthenticated) {
-      setResults([]);
-      setIsSearching(false);
-      setSearchError(null);
-      setHasSearched(false);
-      return;
-    }
+  const triggerGeocodingSearch = useCallback(
+    async (queryText) => {
+      const trimmed = typeof queryText === 'string' ? queryText.trim() : '';
+      cancelPendingSearch();
 
-    latestQueryRef.current = trimmed;
-    setIsSearching(true);
-    setSearchError(null);
-    setIsOpen(true);
-
-    try {
-      const candidates = await searchDestinationLocations(getAccessToken, trimmed, 5);
-      if (latestQueryRef.current === trimmed) {
-        setResults(candidates);
-        setHasSearched(true);
-      }
-    } catch (err) {
-      if (latestQueryRef.current === trimmed) {
+      if (trimmed.length < 3 || !isAuthenticated) {
+        requestSeqRef.current += 1;
         setResults([]);
-        setSearchError(err.message || 'Unable to search destinations right now.');
-        setHasSearched(true);
-      }
-    } finally {
-      if (latestQueryRef.current === trimmed) {
+        setActiveIndex(-1);
         setIsSearching(false);
+        setSearchError(null);
+        setHasSearched(false);
+        setIsOpen(false);
+        return;
       }
+
+      const requestId = ++requestSeqRef.current;
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      setIsSearching(true);
+      setSearchError(null);
+      setResults([]);
+      setActiveIndex(-1);
+      setIsOpen(true);
+
+      try {
+        const candidates = await searchDestinationLocations(getAccessToken, trimmed, 5, {
+          signal: controller.signal,
+        });
+        if (requestSeqRef.current === requestId && !controller.signal.aborted) {
+          setResults(candidates);
+          setActiveIndex(candidates.length > 0 ? 0 : -1);
+          setHasSearched(true);
+        }
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          return;
+        }
+        if (requestSeqRef.current === requestId && !controller.signal.aborted) {
+          setResults([]);
+          setActiveIndex(-1);
+          setSearchError(err.message || 'Unable to search destinations right now.');
+          setHasSearched(true);
+        }
+      } finally {
+        if (requestSeqRef.current === requestId && !controller.signal.aborted) {
+          setIsSearching(false);
+        }
+      }
+    },
+    [cancelPendingSearch, getAccessToken, isAuthenticated]
+  );
+
+  useEffect(() => {
+    if (
+      autoSearchOnMount &&
+      !didAutoSearchRef.current &&
+      isAuthenticated &&
+      !coordsConfirmed &&
+      value.trim().length >= 3
+    ) {
+      didAutoSearchRef.current = true;
+      triggerGeocodingSearch(value);
     }
-  };
+  }, [autoSearchOnMount, isAuthenticated, coordsConfirmed, value, triggerGeocodingSearch]);
 
   const handleInputChange = (event) => {
     const nextText = event.target.value;
 
-    // Immediately clear any previously selected coordinates when user edits text
+    // Cancel any in-flight request and invalidate old request sequence immediately
+    cancelPendingSearch();
+    requestSeqRef.current += 1;
+
+    // Immediately clear stale results and any previously selected coordinates when user edits text
+    setResults([]);
+    setActiveIndex(-1);
+    setIsSearching(false);
+    setSearchError(null);
+    setHasSearched(false);
+
     onDestinationChange({
       destinationName: nextText,
       destinationLatitude: null,
       destinationLongitude: null,
     });
 
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
     const trimmed = nextText.trim();
     if (trimmed.length < 3) {
-      latestQueryRef.current = '';
-      setResults([]);
-      setIsSearching(false);
-      setSearchError(null);
-      setHasSearched(false);
       setIsOpen(false);
       return;
     }
@@ -98,12 +146,12 @@ export default function DestinationSearch({
   };
 
   const handleSelectCandidate = (candidate) => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-    latestQueryRef.current = '';
+    cancelPendingSearch();
+    requestSeqRef.current += 1;
     setIsOpen(false);
     setResults([]);
+    setActiveIndex(-1);
+    setIsSearching(false);
     setHasSearched(false);
     setSearchError(null);
 
@@ -115,12 +163,66 @@ export default function DestinationSearch({
   };
 
   const handleClearCoordinates = () => {
+    cancelPendingSearch();
+    requestSeqRef.current += 1;
+    setResults([]);
+    setActiveIndex(-1);
+    setIsOpen(false);
+    setHasSearched(false);
+    setSearchError(null);
+
     onDestinationChange({
       destinationName: value,
       destinationLatitude: null,
       destinationLongitude: null,
     });
   };
+
+  const handleInputKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      if (isOpen) {
+        event.preventDefault();
+        setIsOpen(false);
+        setActiveIndex(-1);
+      }
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      if (results.length > 0) {
+        event.preventDefault();
+        setIsOpen(true);
+        setActiveIndex((prev) => (prev < results.length - 1 ? prev + 1 : 0));
+      }
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      if (results.length > 0) {
+        event.preventDefault();
+        setIsOpen(true);
+        setActiveIndex((prev) => (prev > 0 ? prev - 1 : results.length - 1));
+      }
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      if (isOpen && results.length > 0 && activeIndex >= 0 && results[activeIndex]) {
+        event.preventDefault();
+        handleSelectCandidate(results[activeIndex]);
+        return;
+      }
+      if (!coordsConfirmed && value.trim().length >= 3 && isAuthenticated && !hasSearched) {
+        event.preventDefault();
+        triggerGeocodingSearch(value);
+      }
+    }
+  };
+
+  const activeOptionId =
+    isOpen && activeIndex >= 0 && results[activeIndex]
+      ? `${inputId}-option-${activeIndex}`
+      : undefined;
 
   return (
     <div className="destination-search">
@@ -129,11 +231,17 @@ export default function DestinationSearch({
           {label} <span aria-hidden="true">*</span>
         </label>
         {coordsConfirmed ? (
-          <span className="coord-status-badge coord-status-verified">
+          <span
+            className="coord-status-badge coord-status-verified"
+            data-testid="coord-status-verified"
+          >
             Map Ready ({Number(latitude).toFixed(4)}°, {Number(longitude).toFixed(4)}°)
           </span>
         ) : value.trim().length > 0 ? (
-          <span className="coord-status-badge coord-status-unverified">
+          <span
+            className="coord-status-badge coord-status-unverified"
+            data-testid="coord-status-unverified"
+          >
             Unverified Text (No Map Coordinates)
           </span>
         ) : null}
@@ -144,10 +252,16 @@ export default function DestinationSearch({
           id={inputId}
           name="destinationName"
           type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={Boolean(isOpen && results.length > 0)}
+          aria-controls={isOpen && results.length > 0 ? listboxId : undefined}
+          aria-activedescendant={activeOptionId}
           autoComplete="off"
           className={error ? 'form-input form-input-error' : 'form-input'}
           value={value}
           onChange={handleInputChange}
+          onKeyDown={handleInputKeyDown}
           maxLength={180}
           placeholder="Type at least 3 characters (e.g. Srinagar, Leh, Tokyo)..."
           required
@@ -221,26 +335,45 @@ export default function DestinationSearch({
           )}
 
           {!isSearching && !searchError && results.length > 0 && (
-            <ul className="destination-results-list" role="listbox" aria-label="Matching places">
-              {results.map((item) => (
-                <li key={item.id} className="destination-result-item">
-                  <button
-                    type="button"
-                    className="destination-result-btn"
-                    onClick={() => handleSelectCandidate(item)}
+            <ul
+              id={listboxId}
+              className="destination-results-list"
+              role="listbox"
+              aria-label="Matching places"
+            >
+              {results.map((item, idx) => {
+                const isSelected = idx === activeIndex;
+                return (
+                  <li
+                    key={item.id}
+                    id={`${inputId}-option-${idx}`}
+                    role="option"
+                    aria-selected={isSelected}
+                    className="destination-result-item"
                   >
-                    <div className="destination-result-main">
-                      <span className="destination-result-name">{item.name}</span>
-                      <span className="destination-result-region">
-                        {[item.admin1, item.admin2, item.country].filter(Boolean).join(' • ')}
+                    <button
+                      type="button"
+                      className={
+                        isSelected
+                          ? 'destination-result-btn destination-result-btn-active'
+                          : 'destination-result-btn'
+                      }
+                      onMouseEnter={() => setActiveIndex(idx)}
+                      onClick={() => handleSelectCandidate(item)}
+                    >
+                      <div className="destination-result-main">
+                        <span className="destination-result-name">{item.name}</span>
+                        <span className="destination-result-region">
+                          {[item.admin1, item.admin2, item.country].filter(Boolean).join(' • ')}
+                        </span>
+                      </div>
+                      <span className="destination-result-coords">
+                        {item.latitude.toFixed(4)}°, {item.longitude.toFixed(4)}°
                       </span>
-                    </div>
-                    <span className="destination-result-coords">
-                      {item.latitude.toFixed(4)}°, {item.longitude.toFixed(4)}°
-                    </span>
-                  </button>
-                </li>
-              ))}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

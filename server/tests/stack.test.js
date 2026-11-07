@@ -4,7 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getHealthStatus } from '../src/controllers/healthController.js';
-import { createRequireAuth, requireAuth } from '../src/middleware/auth.js';
+import {
+  createRequireAuth,
+  isLocalE2EBypassAllowed,
+  requireAuth,
+} from '../src/middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -94,6 +98,102 @@ test('requireAuth rejects demo traveller persona tokens with 401 and does not to
   assert.match(body.error, /Demo preview personas/i);
 });
 
+test('local E2E auth bypass is disabled by default, impossible in production, and restricted to loopback with explicit flag', async () => {
+  const loopbackReq = {
+    ip: '127.0.0.1',
+    headers: {
+      host: 'localhost:3000',
+      origin: 'http://localhost:3000',
+      authorization: 'Bearer e2e-local-playwright-token',
+    },
+  };
+
+  // 1. Rejected when ROUTEWISE_ENABLE_LOCAL_E2E_AUTH is absent or false
+  assert.equal(
+    isLocalE2EBypassAllowed('e2e-local-playwright-token', loopbackReq, {
+      NODE_ENV: 'development',
+    }),
+    false
+  );
+  assert.equal(
+    isLocalE2EBypassAllowed('e2e-local-playwright-token', loopbackReq, {
+      NODE_ENV: 'development',
+      ROUTEWISE_ENABLE_LOCAL_E2E_AUTH: 'false',
+    }),
+    false
+  );
+
+  // 2. Rejected when NODE_ENV is production even if ROUTEWISE_ENABLE_LOCAL_E2E_AUTH is true
+  assert.equal(
+    isLocalE2EBypassAllowed('e2e-local-playwright-token', loopbackReq, {
+      NODE_ENV: 'production',
+      ROUTEWISE_ENABLE_LOCAL_E2E_AUTH: 'true',
+    }),
+    false
+  );
+
+  // 3. Rejected when remote IP or Host/Origin header is non-loopback
+  assert.equal(
+    isLocalE2EBypassAllowed(
+      'e2e-local-playwright-token',
+      {
+        ip: '203.0.113.10',
+        headers: { host: 'localhost:3000' },
+      },
+      {
+        NODE_ENV: 'development',
+        ROUTEWISE_ENABLE_LOCAL_E2E_AUTH: 'true',
+      }
+    ),
+    false
+  );
+  assert.equal(
+    isLocalE2EBypassAllowed(
+      'e2e-local-playwright-token',
+      {
+        ip: '127.0.0.1',
+        headers: { host: 'ais-dev.run.app', origin: 'https://ais-dev.run.app' },
+      },
+      {
+        NODE_ENV: 'development',
+        ROUTEWISE_ENABLE_LOCAL_E2E_AUTH: 'true',
+      }
+    ),
+    false
+  );
+
+  // 4. Allowed ONLY when NODE_ENV !== production, ROUTEWISE_ENABLE_LOCAL_E2E_AUTH === 'true', loopback IP/Host, and exact token
+  assert.equal(
+    isLocalE2EBypassAllowed('e2e-local-playwright-token', loopbackReq, {
+      NODE_ENV: 'development',
+      ROUTEWISE_ENABLE_LOCAL_E2E_AUTH: 'true',
+    }),
+    true
+  );
+
+  // 5. Default requireAuth middleware rejects Bearer e2e-local-playwright-token with 401 when flag is not enabled
+  const prevFlag = process.env.ROUTEWISE_ENABLE_LOCAL_E2E_AUTH;
+  delete process.env.ROUTEWISE_ENABLE_LOCAL_E2E_AUTH;
+  try {
+    let statusCode = null;
+    const res = {
+      status(code) {
+        statusCode = code;
+        return this;
+      },
+      json() {
+        return this;
+      },
+    };
+    await requireAuth(loopbackReq, res, () => {});
+    assert.equal(statusCode, 401);
+  } finally {
+    if (prevFlag !== undefined) {
+      process.env.ROUTEWISE_ENABLE_LOCAL_E2E_AUTH = prevFlag;
+    }
+  }
+});
+
 test('requireAuth passes 503 database error to next(err) when valid Firebase token fails PostgreSQL user sync', async () => {
   let statusCode = null;
   let forwardedError = null;
@@ -147,6 +247,10 @@ test('workspace enforces React .jsx in client/src, .js in server/src, plain SQL 
   // New plain SQL migration location verified
   assert.equal(
     fs.existsSync(path.join(rootDir, 'server/database/migrations/0001_initial_baseline.sql')),
+    true
+  );
+  assert.equal(
+    fs.existsSync(path.join(rootDir, 'server/database/migrations/0002_trip_destination_coordinates.sql')),
     true
   );
 

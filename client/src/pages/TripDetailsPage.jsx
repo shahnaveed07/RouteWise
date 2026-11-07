@@ -345,10 +345,10 @@ export default function TripDetailsPage() {
                 <h2 className="section-heading" style={{ margin: 0 }}>
                   Destination Map
                 </h2>
-                {isOwner && !coordsConfirmed && !isResolvingLocation && (
+                {isOwner && !isResolvingLocation && (
                   <button
                     type="button"
-                    className="btn btn-primary btn-sm"
+                    className={coordsConfirmed ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm'}
                     onClick={() => {
                       setUpdateError(null);
                       setPendingLocation({
@@ -359,12 +359,14 @@ export default function TripDetailsPage() {
                       setIsResolvingLocation(true);
                     }}
                   >
-                    + Confirm Destination Location
+                    {coordsConfirmed
+                      ? 'Change Destination Location'
+                      : '+ Confirm Destination Location'}
                   </button>
                 )}
               </div>
 
-              {isOwner && !coordsConfirmed && isResolvingLocation && (
+              {isOwner && isResolvingLocation && (
                 <form className="resolve-location-box" onSubmit={handleSaveResolvedLocation}>
                   {updateError && (
                     <div className="form-alert form-alert-error" role="alert">
@@ -379,7 +381,22 @@ export default function TripDetailsPage() {
                     disabled={isUpdating}
                     inputId="resolve-trip-destination"
                     label="Search & Select Destination to Attach Coordinates"
+                    autoSearchOnMount={!coordsConfirmed}
                   />
+                  {hasValidCoordinates(
+                    pendingLocation.destinationLatitude,
+                    pendingLocation.destinationLongitude
+                  ) && (
+                    <div className="form-map-preview-block" style={{ marginTop: '0.75rem' }}>
+                      <div className="form-label">New Destination Map Preview</div>
+                      <MapView
+                        latitude={pendingLocation.destinationLatitude}
+                        longitude={pendingLocation.destinationLongitude}
+                        destinationName={pendingLocation.destinationName}
+                        compact
+                      />
+                    </div>
+                  )}
                   <div className="form-actions">
                     <button
                       type="button"

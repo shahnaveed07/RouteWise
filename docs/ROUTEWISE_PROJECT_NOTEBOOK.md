@@ -6,9 +6,9 @@
 **Team:** Naveed Mushtaq, Mohammad Shariq Khawaja, Nayeem  
 **Planning window:** 2–3 months  
 **Target cash budget:** ₹0, subject to provider limits and terms  
-**Document version:** 0.11 (Phase 3 Destination Location, Interactive Leaflet Maps, Open-Meteo Geocoding & Weather Integration)  
+**Document version:** 0.12 (Phase 3.1 Map Display, Destination Selection & Weather Stabilization)  
 **Last updated:** 7 November 2026  
-**Project status:** Phases 0–3 `IMPLEMENTED AND VERIFIED` (PostgreSQL Trip CRUD + Interactive Leaflet/OSM Map + Open-Meteo Geocoding & Weather); Phase 4 Itinerary & Routing `PLANNED`  
+**Project status:** Phases 0–3.1 `IMPLEMENTED AND VERIFIED` (PostgreSQL Trip CRUD + Stabilized Leaflet/OSM Map + Open-Meteo Geocoding & Weather); Phase 4 Itinerary & Routing `PLANNED`  
 
 > This is the living source of truth for the project. AI Studio must update this file after every implementation phase. A planned feature must never be recorded as implemented or verified until the code and test evidence support that status.
 
@@ -54,7 +54,8 @@ Use only these five implementation statuses throughout this notebook:
 | 0.8 | 7 Nov 2026 | Repository audit corrected auth/demo-persona handling, added `/api/auth/me`, SQL baseline file and strict 5-label implementation statuses. | `IMPLEMENTED AND VERIFIED` |
 | 0.9 | 7 Nov 2026 | Locked `pg` (`node-postgres`) as the sole runtime database access layer; retired Prisma ORM claims; defined Phase 2 Trip CRUD implementation gate. | `IMPLEMENTED AND VERIFIED` |
 | 0.10 | 7 Nov 2026 | Completed Phase 2 Trip Management (CRUD): moved SQL baseline to `server/database/migrations/0001_initial_baseline.sql`, removed legacy `server/prisma/schema.prisma`, separated 401 token errors from 503 DB sync errors in `requireAuth`, built Trip CRUD backend/frontend, and verified against live Cloud SQL PostgreSQL. | `IMPLEMENTED AND VERIFIED` |
-| 0.11 | 7 Nov 2026 | Completed Phase 3 Destination Location, Interactive Maps, Geocoding & Weather Integration: applied `0002_trip_destination_coordinates.sql`, added Open-Meteo Geocoding (`GET /api/locations/search`) & Forecast (`GET /api/weather`) adapters, built `MapView.jsx` (Leaflet + OpenStreetMap), `DestinationSearch.jsx`, and `WeatherCard.jsx`, registered Phase 4 openrouteservice config (`https://api.heigit.org/openrouteservice/v2/`), and verified live map tiles, geocoding, and weather in Chromium and Node tests (`15 pass, 0 fail`). | `IMPLEMENTED AND VERIFIED` |
+| 0.11 | 7 Nov 2026 | Completed Phase 3 Destination Location, Interactive Maps, Geocoding & Weather Integration: applied `0002_trip_destination_coordinates.sql`, added Open-Meteo Geocoding (`GET /api/locations/search`) & Forecast (`GET /api/weather`) adapters, built `MapView.jsx` (Leaflet + OpenStreetMap), `DestinationSearch.jsx`, and `WeatherCard.jsx`, and registered Phase 4 openrouteservice config. | `IMPLEMENTED AND VERIFIED` |
+| 0.12 | 7 Nov 2026 | Completed Phase 3.1 Map Display, Destination Selection & Weather Stabilization: hardened `WeatherCard.jsx` coordinate-key isolation and `AbortController` race protection; added `AbortController`, monotonic `requestSeqRef`, keyboard combobox/listbox navigation, and `autoSearchOnMount` to `DestinationSearch.jsx`; hardened Leaflet container stacking context (`isolation: isolate`), resize invalidation, and inline coordinate change on `TripDetailsPage.jsx`; gated local E2E auth bypass behind `ROUTEWISE_ENABLE_LOCAL_E2E_AUTH=true` + `/api/auth/me` verification; separated deterministic `npm test` (`16 pass, 0 fail, 1 skipped`) from opt-in live provider smoke tests (`npm run test:providers`, `7 pass, 0 fail`). | `IMPLEMENTED AND VERIFIED` |
 
 ---
 
@@ -65,6 +66,17 @@ Use only these five implementation statuses throughout this notebook:
 RouteWise is a web application intended to help people organize a trip in one workspace. Users can create trips, search and confirm destination coordinates, explore destinations on an interactive Leaflet/OpenStreetMap view, check live destination weather via Open-Meteo, prepare day-wise itineraries, set a budget, record actual expenses and keep track of shared group costs.
 
 **One-line description:** RouteWise helps travellers plan where to go, when to go and how to manage the cost of the journey.
+
+## 1.2 User-facing map visibility prerequisites (Why a user may or may not see a map)
+
+The interactive map is intentionally placed in specific trip workflows and requires verified coordinates:
+1. **Dashboard (`/dashboard`):** Does **not** render a full slippy map. Instead, each `TripCard.jsx` displays a readiness badge (`Map & Weather Ready` when coordinates are saved vs `Location Unverified` when coordinates are `NULL`).
+2. **Authentication Requirement:** When browsing in default **UI Preview Mode** (`DEMO PREVIEW — NOT AUTHENTICATED` as `Naveed Mushtaq`, `Mohammad Shariq Khawaja`, or `Nayeem`), protected APIs (`/api/trips`, `/api/locations/search`, `/api/weather`) are blocked (`401`) and `/trips/new` displays a sign-in prompt rather than `TripForm.jsx`.
+3. **Create Trip (`/trips/new`):** An authenticated user must type at least 3 characters into the **Destination** field and **select a specific geocoded place** from the Open-Meteo dropdown (e.g., `Srinagar, Jammu and Kashmir, India`). Free-text entry alone is never silently geocoded or guessed. Once a candidate is selected, `destinationName`, `destinationLatitude`, and `destinationLongitude` are set together and a compact `MapView.jsx` preview (`230px` height) renders immediately.
+4. **Trip Details (`/trips/:tripId`):**
+   - If the saved trip has valid coordinates, `TripDetailsPage.jsx` renders the full interactive Leaflet + OpenStreetMap map (`360px` height) with a custom SVG marker and popup alongside `WeatherCard.jsx` (current conditions + 5-day forecast).
+   - If an older or manually typed trip has `NULL` coordinates, `MapView.jsx` shows `"Map Coordinates Not Set"` and the trip owner can click **`+ Confirm Destination Location`** (which automatically searches the trip's destination text on mount), select a candidate, preview the map, and save confirmed coordinates without recreating the trip.
+   - If coordinates already exist, the trip owner can also click **`Change Destination Location`** (or **`Edit Trip`**) to select a new geocoded destination, immediately updating both the map marker/tiles and the weather forecast.
 
 ---
 
@@ -79,7 +91,7 @@ RouteWise is a web application intended to help people organize a trip in one wo
 | Database | PostgreSQL (`ai-studio-de6d6586` in `asia-southeast1`) | Relational SQL database | `IMPLEMENTED AND VERIFIED` |
 | Database access | `pg` (`node-postgres`) | `pg.Pool`, parameterized SQL (`$1, $2, ...`), explicit transactions (`withTransaction`) | `IMPLEMENTED AND VERIFIED` |
 | ORM | None | Raw parameterized SQL runs directly through `pg` | `IMPLEMENTED AND VERIFIED` |
-| Authentication | Firebase Google Sign-In + Firebase Admin token verification | `requireAuth` (`server/src/middleware/auth.js`) returns `401` on invalid/missing/demo tokens and `503` if PostgreSQL user sync fails | `IMPLEMENTED AND VERIFIED` (Middleware & DB upsert); live interactive Google popup `IMPLEMENTED BUT NOT VERIFIED` |
+| Authentication | Firebase Google Sign-In + Firebase Admin token verification | `requireAuth` (`server/src/middleware/auth.js`) returns `401` on invalid/missing/demo tokens and `503` if PostgreSQL user sync fails. Local Playwright E2E bypass is disabled by default (`ROUTEWISE_ENABLE_LOCAL_E2E_AUTH="false"`). | `IMPLEMENTED AND VERIFIED` (Middleware, DB upsert & E2E safety); live interactive Google popup `IMPLEMENTED BUT NOT VERIFIED` |
 | Interactive Maps | Leaflet (`leaflet ^1.9.4`) + OpenStreetMap standard tiles | `client/src/components/MapView.jsx`, `client/src/services/mapConfig.jsx` | `IMPLEMENTED AND VERIFIED` |
 | Destination Geocoding | Open-Meteo Geocoding API | `server/src/services/geocodingService.js`, `GET /api/locations/search` | `IMPLEMENTED AND VERIFIED` |
 | Destination Weather | Open-Meteo Forecast API | `server/src/services/weatherService.js`, `GET /api/weather` | `IMPLEMENTED AND VERIFIED` |
@@ -90,7 +102,7 @@ RouteWise is a web application intended to help people organize a trip in one wo
 | Service / Provider | Real Endpoint Used | API Key Required? | Free / Non-Commercial Terms & Rate Limits | Required Attribution | Production-Readiness Risks & Constraints | Status |
 |---|---|---|---|---|---|---|
 | **OpenStreetMap Standard Tile Server** (rendered via `leaflet`) | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` (configured in `client/src/services/mapConfig.jsx`) | No | Free for non-commercial / low-volume academic MVP use under the [OSM Tile Usage Policy](https://operations.osmfoundation.org/policies/tiles/). Bulk downloading, offline tile scraping, or automated prefetching is strictly forbidden. | `© OpenStreetMap contributors` linked to `https://www.openstreetmap.org/copyright` (displayed in Leaflet attribution control and `.map-attribution-bar`). | **No commercial SLA or unlimited capacity.** Public OSM tile servers are volunteer-run; high-traffic or commercial deployment must substitute `MAP_CONFIG.tileUrlTemplate` with a dedicated/commercial tile provider. | `IMPLEMENTED AND VERIFIED` |
-| **Open-Meteo Geocoding API** | `https://geocoding-api.open-meteo.com/v1/search` (via backend `server/src/services/geocodingService.js`) | No (non-commercial tier) | Free for non-commercial / academic use only. Fair-use rate limit of ~10,000 API calls/day. Bounded 10-minute TTL in-memory cache (`max 100 entries`) and 350ms frontend debounce reduce repeat requests. | Open-Meteo (`CC BY 4.0`). | **Non-commercial license only; no guaranteed SLA.** Commercial deployment requires a paid Open-Meteo API subscription key and commercial host. | `IMPLEMENTED AND VERIFIED` |
+| **Open-Meteo Geocoding API** | `https://geocoding-api.open-meteo.com/v1/search` (via backend `server/src/services/geocodingService.js`) | No (non-commercial tier) | Free for non-commercial / academic use only. Fair-use rate limit of ~10,000 API calls/day. Bounded 10-minute TTL in-memory cache (`max 100 entries`), 350ms frontend debounce, and client `AbortController` reduce repeat requests. | Open-Meteo (`CC BY 4.0`). | **Non-commercial license only; no guaranteed SLA.** Commercial deployment requires a paid Open-Meteo API subscription key and commercial host. | `IMPLEMENTED AND VERIFIED` |
 | **Open-Meteo Forecast API** | `https://api.open-meteo.com/v1/forecast` (via backend `server/src/services/weatherService.js`) | No (non-commercial tier) | Free for non-commercial / academic use only (`CC BY 4.0`). Requests 5-day daily outlook and current conditions with `timezone=auto` and an `8000ms` `AbortController` timeout. | `Weather data by Open-Meteo` linked to `https://open-meteo.com/` (`CC BY 4.0 (Non-commercial use)`). | **Non-commercial license only; no guaranteed SLA.** Weather failures are isolated inside `WeatherCard.jsx` and never block `MapView.jsx` or Trip CRUD. | `IMPLEMENTED AND VERIFIED` |
 | **openrouteservice (HeiGIT)** | Base URL: `https://api.heigit.org/openrouteservice/v2/` (e.g., `/directions/driving-car`, `/directions/foot-walking`, `/directions/cycling-regular`) | Yes: `OPENROUTESERVICE_API_KEY` (server-side only; placeholder in `.env.example`) | Free standard quota subject to HeiGIT registration and per-minute/daily token limits. **Important:** The legacy `api.openrouteservice.org` host was deprecated (shutdown Nov 2026) and must never be used. | openrouteservice by HeiGIT / OpenStreetMap contributors (when rendered in Phase 4). | Key must be configured in AI Studio Secrets / server environment variables before Phase 4 route calculation. If absent, backend will return a safe feature-unavailable response. | `PLANNED` (Registered for Phase 4) |
 
@@ -100,15 +112,15 @@ RouteWise is a web application intended to help people organize a trip in one wo
 
 | ID | Requirement | Priority | Acceptance criteria | Current Evidence | Status |
 |---|---|---|---|---|---|
-| FR-01 | Account access | High | Firebase ID token verified by `requireAuth`; demo tokens return `401`; DB sync failures return `503` (not `401`). | `server/src/middleware/auth.js`, `server/tests/stack.test.js` | `IMPLEMENTED BUT NOT VERIFIED` (Backend middleware & DB sync verified; live interactive Google OAuth popup pending human login) |
+| FR-01 | Account access | High | Firebase ID token verified by `requireAuth`; demo tokens return `401`; DB sync failures return `503` (not `401`). Local E2E bypass disabled by default and impossible in production. | `server/src/middleware/auth.js`, `server/tests/stack.test.js` (`TC-00`, `TC-13`) | `IMPLEMENTED BUT NOT VERIFIED` (Backend middleware, DB sync & E2E guard verified; live interactive Google OAuth popup pending human login) |
 | FR-02 | Create trip | High | Valid title, destination (with optional verified coordinate pair) and travel dates create one trip row in PostgreSQL with `owner_user_id = req.dbUser.id`. | `POST /api/trips`, `server/src/services/tripService.js`, `client/src/pages/NewTripPage.jsx`, `TC-01` | `IMPLEMENTED AND VERIFIED` |
 | FR-03 | Edit trip | High | Owner can update trip details and attach/update destination coordinates via `PATCH /api/trips/:tripId`; invalid date ranges or unpaired coordinates rejected (`400`). | `PATCH /api/trips/:tripId`, `server/src/validators/tripValidator.js`, `TC-02`, `TC-03` | `IMPLEMENTED AND VERIFIED` |
 | FR-04 | List trips | High | Authenticated user sees owned and active-shared trips without duplicates; pending/unrelated users excluded. | `GET /api/trips`, `client/src/pages/DashboardPage.jsx`, `TC-05`, `TC-06` | `IMPLEMENTED AND VERIFIED` |
 | FR-05 | Delete trip | Medium | Authorized owner can delete a trip (`DELETE /api/trips/:tripId` → `204`) after confirmation in `ConfirmDialog.jsx`; dependent records cascade. | `DELETE /api/trips/:tripId`, `ConfirmDialog.jsx`, `TC-04` | `IMPLEMENTED AND VERIFIED` |
 | FR-06 | Add trip members | Medium | Owner can add permitted members; duplicate membership is rejected by `UNIQUE (trip_id, user_id)`. | Read RBAC verified in `trips.test.js`; member management UI/API planned for later collaboration extension. | `PLANNED` |
-| FR-07 | Destination coordinates | High | Trip destination stores paired WGS84 `destination_latitude` (`NUMERIC(9,6)`) and `destination_longitude` (`NUMERIC(9,6)`) selected via Open-Meteo geocoding search; unpaired or out-of-range values rejected (`400` & DB `CHECK`). Editing destination text clears stale coordinates. | `0002_trip_destination_coordinates.sql`, `tripValidator.js`, `DestinationSearch.jsx`, `TC-09`, `TC-10` | `IMPLEMENTED AND VERIFIED` |
-| FR-08 | Map view | High | Saved destinations with valid coordinates render an interactive Leaflet + OpenStreetMap map with marker, popup, zoom controls, and OSM attribution; trips without coordinates show a clear empty/resolution state. | `client/src/components/MapView.jsx`, `TripDetailsPage.jsx`, Playwright browser verification (`TC-12`) | `IMPLEMENTED AND VERIFIED` |
-| FR-09 | Weather lookup | High | Saved destinations with valid coordinates display live current conditions and 5-day forecast from Open-Meteo (`GET /api/weather`) with WMO condition labels and attribution. | `server/src/services/weatherService.js`, `client/src/components/WeatherCard.jsx`, `TC-10`, `TC-11`, `TC-12` | `IMPLEMENTED AND VERIFIED` |
+| FR-07 | Destination coordinates & selection | High | User types `>= 3` chars and explicitly selects a geocoded candidate from `GET /api/locations/search`. Stores paired WGS84 `destination_latitude` (`NUMERIC(9,6)`) and `destination_longitude` (`NUMERIC(9,6)`). Editing destination text immediately clears stale coordinates and results. Out-of-order responses are cancelled/ignored via `AbortController` and `requestSeqRef`. | `0002_trip_destination_coordinates.sql`, `tripValidator.js`, `DestinationSearch.jsx`, `TC-09`, `TC-10`, `TC-12` | `IMPLEMENTED AND VERIFIED` |
+| FR-08 | Map view | High | Saved destinations with valid coordinates render an interactive Leaflet + OpenStreetMap map (`MapView.jsx`) on Create Trip (compact preview) and Trip Details (full map) with marker, popup, zoom controls, resize observer, and OSM attribution; trips without coordinates show a clear empty state and owner-only `+ Confirm Destination Location` flow. | `client/src/components/MapView.jsx`, `TripDetailsPage.jsx`, Playwright browser verification (`TC-12`) | `IMPLEMENTED AND VERIFIED` |
+| FR-09 | Weather lookup | High | Saved destinations with valid coordinates display live current conditions and 5-day forecast from Open-Meteo (`GET /api/weather`) with WMO condition labels and attribution. Weather state is strictly keyed to the current coordinate pair (`buildCoordinateWeatherKey`) so changing coordinates never shows stale weather from a previous destination. | `server/src/services/weatherService.js`, `client/src/components/WeatherCard.jsx`, `TC-10`, `TC-11`, `TC-12` | `IMPLEMENTED AND VERIFIED` |
 | FR-10 | Provider failure handling | High | Geocoding, weather, and map tile errors/timeouts (`AbortController` 8s timeout, `429`, `502`, `504`) show safe retryable messages and fail independently without breaking Trip CRUD or other panels. | `geocodingService.js`, `weatherService.js`, `WeatherCard.jsx`, `MapView.jsx`, `TC-09`, `TC-11` | `IMPLEMENTED AND VERIFIED` |
 | FR-11 | Create itinerary day | High | A trip can have days within its date range; trip/day uniqueness is maintained. | Planned for Phase 4. | `PLANNED` |
 | FR-12 | Manage itinerary activity | High | Authorized user can add, edit, remove and reorder activities for a day. | Planned for Phase 4. | `PLANNED` |
@@ -128,9 +140,9 @@ RouteWise is a web application intended to help people organize a trip in one wo
 
 | Screen / route | Main purpose | Actual Files / Components | Status |
 |---|---|---|---|
-| `/dashboard` | Lists authenticated user's owned and active-shared trips with coordinate readiness badge (`Map & Weather Ready` vs `Location Unverified`). | `DashboardPage.jsx`, `TripList.jsx`, `TripCard.jsx`, `PageHeader.jsx`, `EmptyState.jsx`, `LoadingState.jsx`, `ErrorState.jsx` | `IMPLEMENTED AND VERIFIED` |
-| `/trips/new` | Creates a persisted trip (`TripForm.jsx`) with debounced Open-Meteo `DestinationSearch.jsx` and live compact `MapView.jsx` preview. | `NewTripPage.jsx`, `TripForm.jsx`, `DestinationSearch.jsx`, `MapView.jsx` | `IMPLEMENTED AND VERIFIED` |
-| `/trips/:tripId` | Displays saved trip metadata, interactive **Destination Map** (`MapView.jsx`), live **Destination Weather** (`WeatherCard.jsx`), owner-only inline location resolution (`+ Confirm Destination Location`), edit (`TripForm.jsx`), and delete (`ConfirmDialog.jsx`). | `TripDetailsPage.jsx`, `MapView.jsx`, `WeatherCard.jsx`, `DestinationSearch.jsx`, `TripForm.jsx`, `ConfirmDialog.jsx` | `IMPLEMENTED AND VERIFIED` |
+| `/dashboard` | Lists authenticated user's owned and active-shared trips with coordinate readiness badge (`Map & Weather Ready` vs `Location Unverified`). Does not render a full slippy map. | `DashboardPage.jsx`, `TripList.jsx`, `TripCard.jsx`, `PageHeader.jsx`, `EmptyState.jsx`, `LoadingState.jsx`, `ErrorState.jsx` | `IMPLEMENTED AND VERIFIED` |
+| `/trips/new` | Creates a persisted trip (`TripForm.jsx`) with debounced Open-Meteo `DestinationSearch.jsx` (combobox/listbox keyboard navigation) and live compact `MapView.jsx` preview once a candidate is selected. | `NewTripPage.jsx`, `TripForm.jsx`, `DestinationSearch.jsx`, `MapView.jsx` | `IMPLEMENTED AND VERIFIED` |
+| `/trips/:tripId` | Displays saved trip metadata, interactive **Destination Map** (`MapView.jsx`), live **Destination Weather** (`WeatherCard.jsx`), owner-only inline location confirmation (`+ Confirm Destination Location` with `autoSearchOnMount`) and location change (`Change Destination Location`), full edit (`TripForm.jsx`), and delete (`ConfirmDialog.jsx`). | `TripDetailsPage.jsx`, `MapView.jsx`, `WeatherCard.jsx`, `DestinationSearch.jsx`, `TripForm.jsx`, `ConfirmDialog.jsx` | `IMPLEMENTED AND VERIFIED` |
 | `/trips/:tripId/itinerary` | Day-wise trip plan & openrouteservice route lines | Not yet implemented | `PLANNED` (Phase 4) |
 | `/trips/:tripId/expenses` | Spending and expense splits | Not yet implemented | `PLANNED` (Phase 5) |
 
@@ -138,16 +150,16 @@ RouteWise is a web application intended to help people organize a trip in one wo
 
 | Component / module | Exact path | Public Props / Signature | Imported by (Parent / Screen) | Responsibility & Reason for Existence | Linked Tests & Status |
 |---|---|---|---|---|---|
-| `MapView` | `client/src/components/MapView.jsx` | `{ latitude, longitude, destinationName, compact, emptyMessage }` | `TripDetailsPage.jsx`, `TripForm.jsx` | Manages Leaflet map lifecycle (`useRef`, `useEffect`, `ResizeObserver`, cleanup on unmount to prevent StrictMode double-init errors), renders OpenStreetMap tiles (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`), destination SVG pin marker + popup, and visible attribution. Renders a clean empty state when coordinates are `null`. | `TC-12` (Playwright browser verification) — `IMPLEMENTED AND VERIFIED` |
-| `DestinationSearch` | `client/src/components/DestinationSearch.jsx` | `{ value, latitude, longitude, onDestinationChange, disabled, error, inputId, label }` | `TripForm.jsx`, `TripDetailsPage.jsx` | Debounced (`350ms`, min 3 chars) destination autocomplete calling `GET /api/locations/search`. Displays disambiguated place candidates (`name`, `admin1`, `admin2`, `country`, coordinates), immediately clears stale coordinates if the user edits text after selection, and supports manual text fallback with an explicit `Unverified Text` badge. | `TC-09`, `TC-10`, `TC-12` — `IMPLEMENTED AND VERIFIED` |
-| `WeatherCard` | `client/src/components/WeatherCard.jsx` | `{ latitude, longitude, destinationName }` | `TripDetailsPage.jsx` | Fetches and renders current weather (temperature, feels-like, humidity, wind, precipitation, WMO condition label/icon) and 5-day outlook from `GET /api/weather`, with independent loading/error/retry states and visible `Weather data by Open-Meteo` attribution. | `TC-10`, `TC-11`, `TC-12` — `IMPLEMENTED AND VERIFIED` |
+| `MapView` | `client/src/components/MapView.jsx` | `{ latitude, longitude, destinationName, compact, emptyMessage }` | `TripDetailsPage.jsx`, `TripForm.jsx` | Manages Leaflet map lifecycle (`useRef`, `useEffect`, `ResizeObserver`, `requestAnimationFrame` + delayed `invalidateSize()`, defensive `_leaflet_id` guard, and cleanup on unmount to prevent StrictMode double-init errors), renders OpenStreetMap tiles (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`), destination SVG pin marker + popup, tile error warning, and visible attribution. Renders a clean empty state when coordinates are `null`. | `TC-12` (Playwright browser verification) — `IMPLEMENTED AND VERIFIED` |
+| `DestinationSearch` | `client/src/components/DestinationSearch.jsx` | `{ value, latitude, longitude, onDestinationChange, disabled, error, inputId, label, autoSearchOnMount }` | `TripForm.jsx`, `TripDetailsPage.jsx` | Debounced (`350ms`, min 3 chars) destination autocomplete calling `GET /api/locations/search`. Cancels in-flight requests via `AbortController` and prevents out-of-order overwrites via `requestSeqRef`. Supports `ArrowDown`/`ArrowUp`/`Enter`/`Escape` keyboard combobox navigation, immediately clears stale coordinates if the user edits text after selection, and supports `autoSearchOnMount` when upgrading unverified trips. | `TC-09`, `TC-10`, `TC-12` — `IMPLEMENTED AND VERIFIED` |
+| `WeatherCard` | `client/src/components/WeatherCard.jsx` | `{ latitude, longitude, destinationName }` + exported `buildCoordinateWeatherKey(lat, lon)` | `TripDetailsPage.jsx` | Fetches and renders current weather (temperature, feels-like, humidity, wind, precipitation, WMO condition label/icon) and 5-day outlook from `GET /api/weather`. Keys state by `coordKey` (`buildCoordinateWeatherKey`) and cancels in-flight requests via `AbortController` + `requestSeqRef` so switching destinations never displays stale weather from a previous coordinate pair. | `TC-10`, `TC-11`, `TC-12` — `IMPLEMENTED AND VERIFIED` |
 | `mapConfig` | `client/src/services/mapConfig.jsx` | `MAP_CONFIG`, `hasValidCoordinates(latitude, longitude)` | `MapView.jsx`, `DestinationSearch.jsx`, `WeatherCard.jsx`, `TripForm.jsx`, `TripCard.jsx`, `TripDetailsPage.jsx` | Centralizes the OSM tile URL template, attribution HTML/link, zoom defaults, and WGS84 coordinate pair validation. | `TC-12` — `IMPLEMENTED AND VERIFIED` |
-| `locationService` | `client/src/services/locationService.jsx` | `searchDestinationLocations(getAccessToken, query, count)` | `DestinationSearch.jsx` | Calls `GET /api/locations/search` through `apiClient.jsx`. | `TC-09`, `TC-10`, `TC-12` — `IMPLEMENTED AND VERIFIED` |
-| `weatherService` | `client/src/services/weatherService.jsx` | `fetchDestinationWeather(getAccessToken, latitude, longitude)` | `WeatherCard.jsx` | Calls `GET /api/weather` through `apiClient.jsx`. | `TC-10`, `TC-11`, `TC-12` — `IMPLEMENTED AND VERIFIED` |
+| `locationService` | `client/src/services/locationService.jsx` | `searchDestinationLocations(getAccessToken, query, count, { signal })` | `DestinationSearch.jsx` | Calls `GET /api/locations/search` through `apiClient.jsx` with `AbortSignal` support. | `TC-09`, `TC-10`, `TC-12` — `IMPLEMENTED AND VERIFIED` |
+| `weatherService` | `client/src/services/weatherService.jsx` | `fetchDestinationWeather(getAccessToken, latitude, longitude, { signal })` | `WeatherCard.jsx` | Calls `GET /api/weather` through `apiClient.jsx` with `AbortSignal` support. | `TC-10`, `TC-11`, `TC-12` — `IMPLEMENTED AND VERIFIED` |
 | `TripForm` | `client/src/components/TripForm.jsx` | `{ initialValues, submitLabel, onSubmit, onCancel, isSubmitting, serverError }` | `NewTripPage.jsx`, `TripDetailsPage.jsx` | Create/edit trip form integrating `DestinationSearch.jsx` and compact `MapView.jsx` preview. | `TC-01`..`TC-03`, `TC-12` — `IMPLEMENTED AND VERIFIED` |
 | `TripCard` | `client/src/components/TripCard.jsx` | `{ trip }` | `TripList.jsx` | Displays trip summary card and `Map & Weather Ready` / `Location Unverified` badge. | `TC-12` — `IMPLEMENTED AND VERIFIED` |
 | `TripList` | `client/src/components/TripList.jsx` | `{ trips, isLoading, error, onRetry }` | `DashboardPage.jsx` | Renders loading, error, empty, or card grid of saved trips. | `TC-12` — `IMPLEMENTED AND VERIFIED` |
-| `apiClient` | `client/src/services/apiClient.jsx` | `apiRequest`, `fetchTrips`, `createTripRequest`, `fetchTripById`, `updateTripRequest`, `deleteTripRequest` | `DashboardPage.jsx`, `NewTripPage.jsx`, `TripDetailsPage.jsx`, `locationService.jsx`, `weatherService.jsx` | Centralized authenticated REST client attaching Firebase Bearer token. | `TC-01`..`TC-12` — `IMPLEMENTED AND VERIFIED` |
+| `apiClient` | `client/src/services/apiClient.jsx` | `apiRequest`, `fetchTrips`, `createTripRequest`, `fetchTripById`, `updateTripRequest`, `deleteTripRequest` | `DashboardPage.jsx`, `NewTripPage.jsx`, `TripDetailsPage.jsx`, `locationService.jsx`, `weatherService.jsx` | Centralized authenticated REST client attaching Firebase Bearer token and forwarding `AbortSignal` (`signal`). | `TC-01`..`TC-12` — `IMPLEMENTED AND VERIFIED` |
 
 ---
 
@@ -206,7 +218,7 @@ Node.js + Express API (server/src/app.js)
 | Method & Path | Auth | Parameters / Body | Success Response | Error Codes | Status |
 |---|---|---|---|---|---|
 | `GET /api/health` | Public | None | `200 { status: "ok", service: "routewise-api", stack: "PERN ..." }` | `500` | `IMPLEMENTED AND VERIFIED` |
-| `GET /api/auth/me` | `requireAuth` | Bearer Token | `200 { authenticated: true, user: { ... } }` | `401`, `503` | `IMPLEMENTED BUT NOT VERIFIED` (Live browser popup pending) |
+| `GET /api/auth/me` | `requireAuth` | Bearer Token | `200 { authenticated: true, user: { ... } }` | `401`, `503` | `IMPLEMENTED BUT NOT VERIFIED` (Live browser Google popup pending) |
 | `GET /api/trips` | `requireAuth` | Bearer Token | `200 { trips: [ { ..., destinationLatitude, destinationLongitude } ] }` | `401`, `500`/`503` | `IMPLEMENTED AND VERIFIED` |
 | `POST /api/trips` | `requireAuth` | `{ title, destinationName, destinationLatitude?, destinationLongitude?, description?, startDate, endDate, currency?, plannedBudget? }` | `201 { trip: { ..., destinationLatitude, destinationLongitude } }` | `400`, `401`, `500`/`503` | `IMPLEMENTED AND VERIFIED` |
 | `GET /api/trips/:tripId` | `requireAuth`, `requireTripAccess` | `:tripId` (UUID) | `200 { trip: { ..., destinationLatitude, destinationLongitude } }` | `401`, `404` | `IMPLEMENTED AND VERIFIED` |
@@ -217,7 +229,7 @@ Node.js + Express API (server/src/app.js)
 
 ---
 
-# 7. Code Snippet Library (Phase 3 Additions)
+# 7. Code Snippet Library (Phase 3 & 3.1 Additions)
 
 ### CS-07 — SQL Migration Adding Destination Coordinates (`server/database/migrations/0002_trip_destination_coordinates.sql`)
 - **Related IDs:** `FR-07`, `NFR-06`
@@ -243,14 +255,18 @@ ALTER TABLE "trips"
   );
 ```
 
-### CS-08 — Interactive Leaflet Map Lifecycle & StrictMode Cleanup (`client/src/components/MapView.jsx`)
+### CS-08 — Interactive Leaflet Map Lifecycle, Resize Invalidation & StrictMode Cleanup (`client/src/components/MapView.jsx`)
 - **Related IDs:** `FR-08`, `FR-10`, `TC-12`
 - **Exact File Path & Symbol:** `/client/src/components/MapView.jsx` (`MapView`)
-- **Explanation:** Imports `leaflet` and `leaflet/dist/leaflet.css`, initializes the map once per container ref, attaches the OpenStreetMap tile layer (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`) and destination marker with popup, observes container resize via `ResizeObserver` (`map.invalidateSize()`), and removes the map instance on unmount so React StrictMode and route changes never trigger `"Map container is already initialized"`.
+- **Explanation:** Guards against duplicate Leaflet container initialization, renders OpenStreetMap tiles (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`) and custom SVG pin marker + popup, updates map center (`animate: false`) and marker when coordinates change, calls `map.invalidateSize()` via `requestAnimationFrame`, a post-layout timer, and `ResizeObserver`, and removes the map instance on unmount.
 
 ```jsx
 // Excerpt from /client/src/components/MapView.jsx
 if (!mapInstanceRef.current) {
+  if (containerRef.current._leaflet_id) {
+    containerRef.current._leaflet_id = null;
+  }
+
   const map = L.map(containerRef.current, {
     center: [numericLat, numericLon],
     zoom: MAP_CONFIG.defaultZoom,
@@ -264,24 +280,68 @@ if (!mapInstanceRef.current) {
     attribution: MAP_CONFIG.attributionHtml,
     maxZoom: MAP_CONFIG.maxZoom,
   });
+  tileLayer.on('tileload', () => setTileError(false));
   tileLayer.on('tileerror', () => setTileError(true));
   tileLayer.addTo(map);
   mapInstanceRef.current = map;
+} else {
+  const map = mapInstanceRef.current;
+  map.setView([numericLat, numericLon], map.getZoom() || MAP_CONFIG.defaultZoom, {
+    animate: false,
+  });
+  if (markerRef.current) {
+    markerRef.current.setLatLng([numericLat, numericLon]);
+    markerRef.current.setPopupContent(
+      buildPopupElement(destinationName, numericLat, numericLon)
+    );
+    markerRef.current.openPopup();
+  }
 }
 ```
 
-### CS-09 — Open-Meteo Geocoding & Weather Adapters (`server/src/services/geocodingService.js`, `server/src/services/weatherService.js`)
-- **Related IDs:** `FR-07`, `FR-09`, `FR-10`, `TC-09`, `TC-10`, `TC-11`
-- **Exact File Paths & Symbols:** `/server/src/services/geocodingService.js` (`searchLocations`) and `/server/src/services/weatherService.js` (`getForecastByCoordinates`, `describeWmoWeatherCode`)
-- **Explanation:** Uses `AbortController` timeouts (`8000ms`), normalizes disambiguated place candidates and WMO weather codes, and includes a bounded 10-minute TTL in-memory cache (`max 100 entries`).
+### CS-09 — Geocoding Race Protection (`DestinationSearch.jsx`) & Coordinate-Keyed Weather Isolation (`WeatherCard.jsx`)
+- **Related IDs:** `FR-07`, `FR-09`, `FR-10`, `TC-09`..`TC-12`
+- **Exact File Paths & Symbols:** `/client/src/components/DestinationSearch.jsx` (`triggerGeocodingSearch`) and `/client/src/components/WeatherCard.jsx` (`loadWeather`, `buildCoordinateWeatherKey`)
+- **Explanation:** Both components use `AbortController` and a monotonically increasing `requestSeqRef` to cancel and ignore stale responses. `WeatherCard.jsx` also keys weather state by `currentCoordKey` (`buildCoordinateWeatherKey(latitude, longitude)`) so changing destination coordinates immediately clears any previous destination's weather.
+
+```jsx
+// Excerpt from /client/src/components/WeatherCard.jsx
+const requestId = ++requestSeqRef.current;
+const controller = new AbortController();
+abortControllerRef.current = controller;
+
+setWeatherState((prev) =>
+  prev.coordKey === currentCoordKey ? prev : { coordKey: currentCoordKey, data: null }
+);
+setErrorState({ coordKey: currentCoordKey, message: null });
+setIsLoading(true);
+
+const data = await fetchDestinationWeather(getAccessToken, latitude, longitude, {
+  signal: controller.signal,
+});
+if (requestSeqRef.current === requestId && !controller.signal.aborted) {
+  setWeatherState({ coordKey: currentCoordKey, data });
+}
+```
+
+### CS-10 — Strictly Guarded Local E2E Authentication Check (`server/src/middleware/auth.js`)
+- **Related IDs:** `FR-01`, `TC-13`
+- **Exact File Path & Symbol:** `/server/src/middleware/auth.js` (`isLocalE2EBypassAllowed`)
+- **Explanation:** Ensures the local Playwright E2E token bypass is disabled by default (`ROUTEWISE_ENABLE_LOCAL_E2E_AUTH !== 'true'`), impossible in production (`NODE_ENV === 'production'`), and restricted to loopback IP and loopback `Host`/`Origin` headers.
 
 ```javascript
-// Excerpt from /server/src/services/geocodingService.js
-const url = new URL(PROVIDER_CONFIG.openMeteo.geocodingUrl);
-url.searchParams.set('name', String(query).trim());
-url.searchParams.set('count', String(count));
-url.searchParams.set('language', 'en');
-url.searchParams.set('format', 'json');
+// Excerpt from /server/src/middleware/auth.js
+export function isLocalE2EBypassAllowed(token, req, env = process.env) {
+  if (!env || env.NODE_ENV === 'production') return false;
+  if (env.ROUTEWISE_ENABLE_LOCAL_E2E_AUTH !== 'true') return false;
+  if (token !== DEV_E2E_TOKEN) return false;
+  const remoteIp = req?.ip || req?.socket?.remoteAddress || '';
+  if (!isLoopbackAddress(remoteIp)) return false;
+  if (!isLoopbackHeaderHost(req?.headers?.host) || !isLoopbackHeaderHost(req?.headers?.origin)) {
+    return false;
+  }
+  return true;
+}
 ```
 
 ---
@@ -290,12 +350,13 @@ url.searchParams.set('format', 'json');
 
 | Test ID | Requirement | Scenario | Command Executed | Expected Result | Actual Result & Evidence | Status |
 |---|---|---|---|---|---|---|
-| `TC-00` | `NFR-05`, `NFR-07` | Stack, health, auth `401` vs `503` separation, SQL migration path, zero Prisma/TypeScript check. | `node --test server/tests/stack.test.js` | 5/5 pass | `5 pass, 0 fail` | `IMPLEMENTED AND VERIFIED` |
-| `TC-01`..`TC-08` | `FR-02`..`FR-05`, `FR-13`, `NFR-05` | Trip CRUD, date/budget/coordinate pair validation, owner/member/viewer RBAC, and PostgreSQL persistence + Express HTTP integration. | `node --test server/tests/trips.test.js` | 4/4 suites pass against live Cloud SQL PostgreSQL | `4 pass, 0 fail` (including persistence of `destinationLatitude: 34.0484, destinationLongitude: 74.3805` on `trips`) | `IMPLEMENTED AND VERIFIED` |
-| `TC-09` | `FR-07`, `FR-10` | Geocoding validator & service mocked tests: short query rejection (`<3` chars), disambiguated results (`Srinagar, Jammu and Kashmir, India` vs `Srinagar, Uttarakhand, India`), empty results (`[]`), `429` rate limit, `502` upstream error, `504` timeout. | `node --test server/tests/locationWeather.test.js` | Pass | Passed (`locationValidator` & `geocodingService` unit tests) | `IMPLEMENTED AND VERIFIED` |
-| `TC-10` | `FR-07`, `FR-09` | Live Open-Meteo Geocoding & Forecast API integration test for `Srinagar`. | `node --test server/tests/locationWeather.test.js` | Real HTTPS responses normalized with coordinates, temperature, 5-day daily array, and Open-Meteo attribution URL. | Passed (`live Open-Meteo Geocoding and Forecast APIs return real normalized data for Srinagar`, `2686ms`). | `IMPLEMENTED AND VERIFIED` |
-| `TC-11` | `FR-09`, `FR-10` | Weather validator & service mocked tests: out-of-range lat/lon rejection (`400`), WMO code mapping, incomplete payload handling (`502`). | `node --test server/tests/locationWeather.test.js` | Pass | Passed (`weatherValidator`, `weatherService`, and controller tests). | `IMPLEMENTED AND VERIFIED` |
-| `TC-12` | `FR-07`, `FR-08`, `FR-09` | Real Chromium browser verification (`playwright-cli`) of destination autocomplete -> form map preview -> trip creation -> `TripDetailsPage` Leaflet map render -> OSM HTTPS tile requests -> popup & attribution -> live `WeatherCard` -> zoom -> route navigation away/back -> mobile/desktop resize -> cleanup delete. | `playwright-cli` on `http://localhost:3000` | Non-zero map dimensions, HTTP 200 tile responses from `tile.openstreetmap.org`, visible popup & attributions, zero console errors. | **PASS:** Desktop map `526x360`, mobile map `316x360`, `29` tiles loaded (`200 OK` from `https://tile.openstreetmap.org/11/1449/817.png`), popup `"Srinagar, Jammu and Kashmir, India\n34.0857°, 74.8055°"`, weather `"10.2°C"`, `0` console/page errors. | `IMPLEMENTED AND VERIFIED` |
+| `TC-00` | `NFR-05`, `NFR-07` | Stack, health, auth `401` vs `503` separation, SQL migration path, zero Prisma/TypeScript check. | `npm test` (`node --test server/tests/*.test.js`) | Pass | Passed in `server/tests/stack.test.js` (`6 pass, 0 fail`). | `IMPLEMENTED AND VERIFIED` |
+| `TC-01`..`TC-08` | `FR-02`..`FR-05`, `FR-13`, `NFR-05` | Trip CRUD, date/budget/coordinate pair validation, owner/member/viewer RBAC, and PostgreSQL persistence + Express HTTP integration. | `npm test` (`node --test server/tests/trips.test.js`) | 4/4 suites pass against live Cloud SQL PostgreSQL | `4 pass, 0 fail` (including persistence of `destinationLatitude: 34.0484, destinationLongitude: 74.3805` on `trips`). | `IMPLEMENTED AND VERIFIED` |
+| `TC-09` | `FR-07`, `FR-10` | Deterministic mocked geocoding validator, disambiguated results (`Srinagar, Jammu and Kashmir, India` vs `Srinagar, Uttarakhand, India`), empty results (`[]`), `429` rate limit, `502` upstream error, `504` timeout. | `npm test` | Pass without external network dependency | Passed (`locationValidator` & `geocodingService` unit tests). | `IMPLEMENTED AND VERIFIED` |
+| `TC-10` | `FR-07`, `FR-09` | Opt-in live Open-Meteo Geocoding & Forecast API smoke test for `Srinagar`. | `npm run test:providers` (`RUN_LIVE_PROVIDER_TESTS=1 node --test server/tests/locationWeather.test.js`) | Real HTTPS responses normalized with coordinates, temperature, 5-day daily array, and Open-Meteo attribution URL. | **PASS (`7 pass, 0 fail`, `2914ms`)**: Live Open-Meteo test completed in `2658.66ms`. Skipped cleanly (`1 skipped`) during default `npm test` (`16 pass, 0 fail, 1 skipped`). | `IMPLEMENTED AND VERIFIED` |
+| `TC-11` | `FR-09`, `FR-10` | Weather validator, WMO code mapping, incomplete payload handling (`502`), and distinct coordinate cache isolation (`34.0837,74.7974` vs `34.1526,77.5770`). | `npm test` | Pass | Passed (`weatherValidator`, `weatherService`, and cache isolation tests). | `IMPLEMENTED AND VERIFIED` |
+| `TC-12` | `FR-07`, `FR-08`, `FR-09` | Real Chromium browser E2E verification (`playwright-cli` on `http://localhost:3000`):<br>A–G. Create Trip (`Srinagar` -> select `Srinagar, Jammu and Kashmir, India`, compact map preview, edit text clears pin, re-select & save -> Trip Details full map, marker, popup, OSM/Open-Meteo attributions, weather `9.7°C Clear sky`).<br>H. Change destination location inline (`Le Havre, Normandy, France` `49.4935°, 0.1079°`) -> map & weather update immediately (`11.4°C Partly cloudy`, `EUROPE/PARIS`) with zero stale Srinagar data.<br>I. Navigate away/back & resize desktop (`1440x900`) / mobile (`390x844`).<br>J. Create unverified trip (`Gulmarg`, `NULL` coords) -> verify empty map/weather states -> click `+ Confirm Destination Location` (`autoSearchOnMount`) -> select & save -> verify full map & weather appear -> delete test fixtures. | `playwright-cli` on `http://localhost:3000` | Non-zero map dimensions, HTTP 200 tile responses from `tile.openstreetmap.org`, updated marker/weather on coordinate change, zero console/page errors, zero leftover test rows (`REMAINING_P31_TRIPS: []`). | **PASS:** Screenshots captured (`.playwright-cli/p31-create-preview.png`, `p31-details-srinagar-desktop.png`, `p31-details-leh-updated.png`, `p31-details-mobile.png`), HTTP `200` OSM tiles & Open-Meteo responses, `0` uncaught page/console errors, and `REMAINING_P31_TRIPS: []`. | `IMPLEMENTED AND VERIFIED` |
+| `TC-13` | `FR-01` | Local E2E bypass & demo persona safety: verify `ROUTEWISE_DEV_E2E_AUTH=1` in browser `localStorage` is rejected (`401` on `/api/auth/me`) and cleared when server `ROUTEWISE_ENABLE_LOCAL_E2E_AUTH` is absent, and demo personas cannot call `/api/locations/search` or `POST /api/trips` (`401`). | `npm test` (`stack.test.js`) + `playwright-cli` default server check | `401 Unauthorized` on `/api/auth/me`, `/api/locations/search`, and `POST /api/trips`; UI stays in `DEMO PREVIEW — NOT AUTHENTICATED`. | **PASS:** Unit tests in `stack.test.js` + Chromium verification confirmed `401` rejection and automatic `localStorage` cleanup when flag is off. | `IMPLEMENTED AND VERIFIED` |
 
 ---
 
@@ -303,46 +364,32 @@ url.searchParams.set('format', 'json');
 
 | Issue ID | Component / Area | Root Cause Identified | Fix Implemented | Verification |
 |---|---|---|---|---|
-| `BUG-P3-01` | Missing Interactive Map in Phase 2 Baseline | 1. Although `leaflet` (`^1.9.4`) was listed in `package.json`, no `MapView.jsx` component existed and `leaflet/dist/leaflet.css` was never imported anywhere in `client/src/`.<br>2. The PostgreSQL `trips` table only stored `destination_name` (`VARCHAR(180)`) with no `destination_latitude` or `destination_longitude` columns.<br>3. `TripForm.jsx` only had a plain text input with no geocoding search to resolve WGS84 coordinates. | 1. Applied `server/database/migrations/0002_trip_destination_coordinates.sql` adding `destination_latitude` and `destination_longitude` (`NUMERIC(9,6)`) with a paired range `CHECK` constraint.<br>2. Built Open-Meteo Geocoding adapter (`GET /api/locations/search`) and `DestinationSearch.jsx` autocomplete.<br>3. Built `MapView.jsx` importing `leaflet` and `leaflet/dist/leaflet.css` with explicit `.leaflet-map-container` height (`360px`), SVG `divIcon` marker, `ResizeObserver`, and StrictMode cleanup. | Verified in Chromium via `playwright-cli` (`29` OSM tiles returned `200 OK`, map bounding box `526x360` desktop / `316x360` mobile, `0` console errors). |
+| `BUG-P3-01` | Missing Interactive Map in Phase 2 Baseline | 1. `leaflet` (`^1.9.4`) was installed in `package.json`, but no `MapView.jsx` component existed and `leaflet/dist/leaflet.css` was never imported.<br>2. `trips` only stored `destination_name` without coordinate columns.<br>3. `TripForm.jsx` had no geocoding search to resolve WGS84 coordinates. | Applied `0002_trip_destination_coordinates.sql`, built Open-Meteo geocoding/weather adapters, and built `MapView.jsx`, `DestinationSearch.jsx`, and `WeatherCard.jsx`. | Verified in Phase 3 (`v0.11`). |
+| `BUG-P31-01` | Stale Weather Display & Race Condition When Coordinates Change (`WeatherCard.jsx`) | `WeatherCard.jsx` kept a single `weather` state object without associating it with the `(latitude, longitude)` pair that produced it and did not cancel in-flight requests. When coordinates changed on `TripDetailsPage.jsx`, the previous destination's weather remained visible while loading (or if the new fetch failed), and out-of-order responses could overwrite newer coordinates. | Added `buildCoordinateWeatherKey(latitude, longitude)`, keyed `weatherState` and `errorState` by `coordKey`, cleared mismatched weather immediately on coordinate change, and added `AbortController` + monotonic `requestSeqRef`. | Verified in Chromium (`TC-12` Step H: changing coordinates from Srinagar `34.0857,74.8055` `9.7°C` to `49.4935,0.1079` `11.4°C` updated both map and weather with zero stale data). |
+| `BUG-P31-02` | In-Flight Geocoding Cancellation, Keyboard Navigation & Enter Key Submission (`DestinationSearch.jsx`) | `DestinationSearch.jsx` did not abort in-flight `fetch` calls via `AbortController`, lacked keyboard `ArrowDown`/`ArrowUp`/`Enter`/`Escape` combobox navigation, and pressing `Enter` in the destination input could trigger form submission before selecting a geocoded result. | Added `AbortController` passthrough (`apiClient.jsx`, `locationService.jsx`), monotonic `requestSeqRef`, ARIA combobox/listbox attributes, keyboard navigation (`ArrowDown`, `ArrowUp`, `Enter` to select/search, `Escape`), and `autoSearchOnMount`. | Verified in `npm run build`, `npm test`, and Chromium (`TC-12`). |
+| `BUG-P31-03` | Local Playwright E2E Auth Bypass Enabled Without Explicit Env Flag (`auth.js`, `AuthContext.jsx`) | `server/src/middleware/auth.js` accepted `DEV_E2E_TOKEN` whenever `NODE_ENV !== 'production'` on loopback without requiring an explicit opt-in environment variable, and `AuthContext.jsx` trusted `localStorage` on localhost before checking `/api/auth/me`. | Added `isLocalE2EBypassAllowed` requiring `ROUTEWISE_ENABLE_LOCAL_E2E_AUTH === 'true'`, `NODE_ENV !== 'production'`, loopback IP, and loopback `Host`/`Origin` headers. Updated `AuthContext.jsx` to verify `/api/auth/me` before activating `dev_e2e` and clear `localStorage` on `401`. | Verified in `server/tests/stack.test.js` (`TC-13`) and Chromium default-mode test. |
+| `BUG-P31-04` | Deterministic Default Test Suite & Inline Coordinate Change UX (`locationWeather.test.js`, `TripDetailsPage.jsx`) | 1. `server/tests/locationWeather.test.js` called live Open-Meteo endpoints unconditionally during `npm test`.<br>2. `TripDetailsPage.jsx` only showed `+ Confirm Destination Location` when coordinates were `NULL`, requiring full form edit to change an existing destination pin. | 1. Gated live Open-Meteo smoke test behind `RUN_LIVE_PROVIDER_TESTS=1` (`npm run test:providers`).<br>2. Enabled `Change Destination Location` + `autoSearchOnMount` + compact `MapView` preview in `TripDetailsPage.jsx` and added `isolation: isolate` to `.leaflet-map-container`. | Verified via `npm test` (`16 pass, 1 skipped`), `npm run test:providers` (`7 pass`), and Chromium (`TC-12`). |
 
 ---
 
-# 10. Implementation Log — Phase 3 Entry
+# 10. Implementation Log — Phase 3.1 Entry
 
-### Phase 3 — Destination Location, Interactive Maps, Geocoding & Weather Integration (`v0.11`)
+### Phase 3.1 — Map Display, Destination Selection & Weather Stabilization (`v0.12`)
 
 - **Date:** 2026-11-07
-- **Phase:** P3
+- **Phase:** P3.1
 - **Status:** `IMPLEMENTED AND VERIFIED`
-- **Files created:**
-  - `/server/database/migrations/0002_trip_destination_coordinates.sql`
-  - `/server/src/config/providers.js`
-  - `/server/src/validators/locationValidator.js`
-  - `/server/src/validators/weatherValidator.js`
-  - `/server/src/services/geocodingService.js`
-  - `/server/src/services/weatherService.js`
-  - `/server/src/controllers/locationController.js`
-  - `/server/src/controllers/weatherController.js`
-  - `/server/src/routes/locationRoutes.js`
-  - `/server/src/routes/weatherRoutes.js`
-  - `/server/tests/locationWeather.test.js`
-  - `/client/src/services/mapConfig.jsx`
-  - `/client/src/services/locationService.jsx`
-  - `/client/src/services/weatherService.jsx`
-  - `/client/src/components/MapView.jsx`
-  - `/client/src/components/DestinationSearch.jsx`
-  - `/client/src/components/WeatherCard.jsx`
 - **Files modified:**
-  - `/.env.example` (added `OPENROUTESERVICE_API_KEY` placeholder for Phase 4)
-  - `/server/src/validators/tripValidator.js` (added paired WGS84 `normalizeCoordinatePair` validation)
-  - `/server/src/services/tripService.js` (selected, inserted, and updated `destination_latitude` & `destination_longitude`)
-  - `/server/src/middleware/auth.js` & `/client/src/context/AuthContext.jsx` (added strictly localhost/non-production Playwright E2E verification support while preserving `401` rejection for `demo-*` and invalid tokens)
-  - `/server/src/app.js` (mounted `/api/locations` and `/api/weather`)
-  - `/server/tests/trips.test.js` (added coordinate pair validation and PostgreSQL coordinate persistence tests)
-  - `/client/src/components/TripForm.jsx` (integrated `DestinationSearch.jsx` and compact `MapView.jsx` preview)
-  - `/client/src/components/TripCard.jsx` (added `Map & Weather Ready` / `Location Unverified` status badge)
-  - `/client/src/pages/TripDetailsPage.jsx` (added Destination Map section, Destination Weather section, and inline `+ Confirm Destination Location` owner flow)
-  - `/client/src/styles/index.css` (added CSS rules for `.leaflet-map-container`, `.destination-search`, `.weather-card-content`, and `.trip-insights-grid`)
-  - `/package.json` (updated `"lint"` script to check all 19 backend `.js` modules)
-  - `/docs/ROUTEWISE_PROJECT_NOTEBOOK.md` (updated to v0.11)
+  - `/server/src/middleware/auth.js` (added `isLocalE2EBypassAllowed` requiring `ROUTEWISE_ENABLE_LOCAL_E2E_AUTH=true`, `NODE_ENV !== 'production'`, loopback IP, and loopback `Host`/`Origin` headers)
+  - `/.env.example` (documented `ROUTEWISE_ENABLE_LOCAL_E2E_AUTH="false"`)
+  - `/client/src/context/AuthContext.jsx` (verified local E2E token against `/api/auth/me` before activating `dev_e2e` session and cleared `localStorage` on `401`)
+  - `/client/src/services/apiClient.jsx` (added `signal` support and direct `AbortError` passthrough)
+  - `/client/src/services/locationService.jsx` & `/client/src/services/weatherService.jsx` (forwarded `signal` to `apiRequest`)
+  - `/client/src/components/DestinationSearch.jsx` (added `AbortController`, monotonic `requestSeqRef`, keyboard combobox/listbox navigation, and `autoSearchOnMount`)
+  - `/client/src/components/WeatherCard.jsx` (added `buildCoordinateWeatherKey`, coordinate-keyed state isolation, `AbortController`, and `requestSeqRef`)
+  - `/client/src/components/MapView.jsx` (added defensive `_leaflet_id` cleanup, `tileload` error reset, `animate: false` coordinate view update, and `requestAnimationFrame` + timer + `ResizeObserver` `invalidateSize()`)
+  - `/client/src/pages/TripDetailsPage.jsx` (enabled owner inline `Change Destination Location`, `autoSearchOnMount` for unverified trips, and compact `MapView` preview inside the location resolution box)
+  - `/client/src/styles/index.css` (added `position: relative; isolation: isolate;` to `.leaflet-map-container` and `.destination-result-btn-active` highlight style)
+  - `/package.json`, `/server/tests/stack.test.js`, `/server/tests/locationWeather.test.js` (added `npm run test:providers`, gated live Open-Meteo smoke test behind `RUN_LIVE_PROVIDER_TESTS=1`, and added E2E auth bypass safety & cache isolation unit tests)
+  - `/docs/ROUTEWISE_PROJECT_NOTEBOOK.md` (updated to v0.12)
 - **Next Recommended Development Phase:** **Phase 4 — Day-Wise Itinerary (`itinerary_days`, `itinerary_items`, `places`) & Multi-Stop Route Calculation via openrouteservice (`https://api.heigit.org/openrouteservice/v2/`)**.

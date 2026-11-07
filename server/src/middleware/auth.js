@@ -12,6 +12,55 @@ function isLoopbackAddress(ip = '') {
   );
 }
 
+function isLoopbackHeaderHost(rawValue = '') {
+  if (!rawValue || typeof rawValue !== 'string') {
+    return true;
+  }
+  try {
+    const candidate = rawValue.includes('://') ? new URL(rawValue).hostname : rawValue.split(':')[0];
+    const normalized = candidate.trim().toLowerCase();
+    return (
+      normalized === 'localhost' ||
+      normalized === '127.0.0.1' ||
+      normalized === '[::1]' ||
+      normalized === '::1'
+    );
+  } catch (_err) {
+    return false;
+  }
+}
+
+/**
+ * Checks whether the strictly local non-production Playwright E2E bypass is allowed.
+ * Disabled by default. Requires:
+ * 1. NODE_ENV !== 'production'
+ * 2. ROUTEWISE_ENABLE_LOCAL_E2E_AUTH === 'true'
+ * 3. Exact DEV_E2E_TOKEN match
+ * 4. Loopback socket/request IP address
+ * 5. Loopback Host and Origin headers (if present)
+ */
+export function isLocalE2EBypassAllowed(token, req, env = process.env) {
+  if (!env || env.NODE_ENV === 'production') {
+    return false;
+  }
+  if (env.ROUTEWISE_ENABLE_LOCAL_E2E_AUTH !== 'true') {
+    return false;
+  }
+  if (token !== DEV_E2E_TOKEN) {
+    return false;
+  }
+  const remoteIp = req?.ip || req?.socket?.remoteAddress || '';
+  if (!isLoopbackAddress(remoteIp)) {
+    return false;
+  }
+  const hostHeader = req?.headers?.host || '';
+  const originHeader = req?.headers?.origin || '';
+  if (!isLoopbackHeaderHost(hostHeader) || !isLoopbackHeaderHost(originHeader)) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Factory for the authentication middleware to support deterministic unit testing
  * of token verification failures (401) vs. PostgreSQL synchronization failures (503).
@@ -19,11 +68,7 @@ function isLoopbackAddress(ip = '') {
  */
 export function createRequireAuth({
   verifyToken = (token, req) => {
-    if (
-      process.env.NODE_ENV !== 'production' &&
-      token === DEV_E2E_TOKEN &&
-      isLoopbackAddress(req?.ip || req?.socket?.remoteAddress || '')
-    ) {
+    if (isLocalE2EBypassAllowed(token, req, process.env)) {
       return Promise.resolve({
         uid: 'e2e-playwright-verifier',
         email: 'e2e.verifier@routewise.test',
