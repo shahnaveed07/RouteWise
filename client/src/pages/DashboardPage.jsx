@@ -4,13 +4,17 @@ import EmptyState from '../components/EmptyState.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function DashboardPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, isAuthenticated } = useAuth();
+
+  const authSubtitle = isAuthenticated
+    ? `Authenticated via Firebase as ${currentUser.fullName} (${currentUser.email})`
+    : `UI Preview Mode (Unauthenticated Demo Persona): ${currentUser.fullName} (${currentUser.email})`;
 
   return (
     <div>
       <PageHeader
         title="Trips Dashboard"
-        subtitle={`Signed in as ${currentUser.fullName} (${currentUser.email})`}
+        subtitle={authSubtitle}
         actions={
           <Link to="/trips/new" className="btn btn-primary">
             + Create New Trip

@@ -1,12 +1,25 @@
 import express from 'express';
 import healthRoutes from './routes/healthRoutes.js';
+import { requireAuth } from './middleware/auth.js';
 
 const app = express();
 
 app.use(express.json({ limit: '1mb' }));
 
-// REST API routes
+// Public REST API health check
 app.use('/api/health', healthRoutes);
+
+// Protected account verification endpoint (requires verified Firebase Bearer token)
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.status(200).json({
+    authenticated: true,
+    user: req.dbUser || {
+      uid: req.user.uid,
+      email: req.user.email || null,
+      fullName: req.user.name || null,
+    },
+  });
+});
 
 // 404 handler for unknown /api/* endpoints
 app.use('/api', (req, res) => {

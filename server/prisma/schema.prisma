@@ -1,6 +1,19 @@
-// RouteWise — PostgreSQL Relational Schema (Prisma ORM)
-// Database: PostgreSQL (Cloud SQL Developer Edition)
-// Stack: PERN (PostgreSQL, Express.js, React.js, Node.js)
+// RouteWise — PostgreSQL Relational Schema Definition
+// Database: PostgreSQL (Cloud SQL Developer Edition: ai-studio-de6d6586)
+//
+// CONNECTION & ORM AUDIT NOTE:
+// 1. Runtime Database Access: The AI Studio Cloud SQL container injects split
+//    Unix-socket environment variables (SQL_HOST, SQL_DB_NAME, SQL_USER,
+//    SQL_PASSWORD) rather than a single DATABASE_URL string. Therefore, runtime
+//    queries and ACID transactions execute through `server/src/config/db.js`
+//    using `pg.Pool` (node-postgres) with parameterized SQL.
+// 2. Role of this File: This Prisma schema serves as the canonical relational
+//    data model specification matching the 8 live PostgreSQL tables in `public`.
+//    `@prisma/client` and `prisma migrate` CLI are not active at runtime.
+// 3. SQL CHECK Constraints: PostgreSQL CHECK constraints applied in the database
+//    (see `server/prisma/migrations/0001_initial_baseline/migration.sql`) are
+//    noted with `@check` comments below because Prisma schema syntax does not
+//    natively declare SQL CHECK clauses.
 
 generator client {
   provider = "prisma-client-js"
@@ -29,6 +42,8 @@ model User {
   @@map("users")
 }
 
+/// @check chk_trips_dates: end_date >= start_date
+/// @check chk_trips_budget_non_negative: planned_budget >= 0
 model Trip {
   id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   ownerUserId     String         @map("owner_user_id") @db.Uuid
@@ -66,6 +81,7 @@ model TripMember {
   @@map("trip_members")
 }
 
+/// @check chk_itinerary_days_order_positive: day_order >= 1
 model ItineraryDay {
   id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tripId    String          @map("trip_id") @db.Uuid
@@ -81,6 +97,7 @@ model ItineraryDay {
   @@map("itinerary_days")
 }
 
+/// @check chk_places_coords_pair_and_range: both lat/lon null OR (lat in [-90,90] and lon in [-180,180])
 model Place {
   id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   provider        String?         @db.VarChar(40)
@@ -96,6 +113,8 @@ model Place {
   @@map("places")
 }
 
+/// @check chk_itinerary_items_cost_non_negative: estimated_cost >= 0
+/// @check chk_itinerary_items_sort_positive: sort_order >= 1
 model ItineraryItem {
   id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   itineraryDayId String       @map("itinerary_day_id") @db.Uuid
@@ -114,6 +133,7 @@ model ItineraryItem {
   @@map("itinerary_items")
 }
 
+/// @check chk_expenses_amount_positive: amount > 0
 model Expense {
   id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tripId          String         @map("trip_id") @db.Uuid
@@ -136,6 +156,7 @@ model Expense {
   @@map("expenses")
 }
 
+/// @check chk_expense_splits_share_non_negative: share_amount >= 0
 model ExpenseSplit {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   expenseId   String   @map("expense_id") @db.Uuid

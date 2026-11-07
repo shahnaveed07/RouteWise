@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getHealthStatus } from '../src/controllers/healthController.js';
+import { requireAuth } from '../src/middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,11 +34,71 @@ test('getHealthStatus returns 200 and PERN stack metadata', () => {
   assert.match(body.stack, /PERN/);
 });
 
-test('workspace enforces React .jsx in client/src and .js in server/src with Prisma schema', () => {
+test('requireAuth rejects missing Authorization header with 401', async () => {
+  let statusCode = null;
+  let body = null;
+  let nextCalled = false;
+
+  const req = { headers: {} };
+  const res = {
+    status(code) {
+      statusCode = code;
+      return this;
+    },
+    json(payload) {
+      body = payload;
+      return this;
+    },
+  };
+
+  await requireAuth(req, res, () => {
+    nextCalled = true;
+  });
+
+  assert.equal(nextCalled, false);
+  assert.equal(statusCode, 401);
+  assert.match(body.error, /Unauthorized/i);
+});
+
+test('requireAuth rejects demo traveller persona tokens with 401', async () => {
+  let statusCode = null;
+  let body = null;
+  let nextCalled = false;
+
+  const req = {
+    headers: {
+      authorization: 'Bearer demo-naveed',
+    },
+  };
+  const res = {
+    status(code) {
+      statusCode = code;
+      return this;
+    },
+    json(payload) {
+      body = payload;
+      return this;
+    },
+  };
+
+  await requireAuth(req, res, () => {
+    nextCalled = true;
+  });
+
+  assert.equal(nextCalled, false);
+  assert.equal(statusCode, 401);
+  assert.match(body.error, /Demo preview personas/i);
+});
+
+test('workspace enforces React .jsx in client/src, .js in server/src, Prisma schema, and SQL baseline', () => {
   assert.equal(fs.existsSync(path.join(rootDir, 'client/src/main.jsx')), true);
   assert.equal(fs.existsSync(path.join(rootDir, 'client/src/App.jsx')), true);
   assert.equal(fs.existsSync(path.join(rootDir, 'client/src/styles/index.css')), true);
   assert.equal(fs.existsSync(path.join(rootDir, 'server/server.js')), true);
   assert.equal(fs.existsSync(path.join(rootDir, 'server/src/app.js')), true);
   assert.equal(fs.existsSync(path.join(rootDir, 'server/prisma/schema.prisma')), true);
+  assert.equal(
+    fs.existsSync(path.join(rootDir, 'server/prisma/migrations/0001_initial_baseline/migration.sql')),
+    true
+  );
 });

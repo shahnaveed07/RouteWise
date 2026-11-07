@@ -2,7 +2,16 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function AppShell() {
-  const { currentUser, demoTravellers, selectDemoTraveller } = useAuth();
+  const {
+    currentUser,
+    isAuthenticated,
+    isDemo,
+    demoTravellers,
+    selectDemoTraveller,
+    signInWithGoogle,
+    logout,
+    authError,
+  } = useAuth();
 
   return (
     <div className="app-shell">
@@ -34,21 +43,50 @@ export default function AppShell() {
           </nav>
 
           <div className="user-switcher">
-            <label htmlFor="traveller-switcher">Active Traveller:</label>
-            <select
-              id="traveller-switcher"
-              className="user-select"
-              value={currentUser.id}
-              onChange={(e) => selectDemoTraveller(e.target.value)}
+            <span
+              className={
+                isAuthenticated ? 'auth-badge auth-badge-verified' : 'auth-badge auth-badge-demo'
+              }
             >
-              {demoTravellers.map((traveller) => (
-                <option key={traveller.id} value={traveller.id}>
-                  {traveller.fullName} ({traveller.roleLabel})
-                </option>
-              ))}
-            </select>
+              {isAuthenticated
+                ? 'AUTHENTICATED (FIREBASE)'
+                : 'DEMO PREVIEW — NOT AUTHENTICATED'}
+            </span>
+
+            {isDemo && (
+              <>
+                <label htmlFor="traveller-switcher">UI Preview Persona:</label>
+                <select
+                  id="traveller-switcher"
+                  className="user-select"
+                  value={currentUser.id}
+                  onChange={(e) => selectDemoTraveller(e.target.value)}
+                >
+                  {demoTravellers.map((traveller) => (
+                    <option key={traveller.id} value={traveller.id}>
+                      {traveller.fullName} ({traveller.roleLabel})
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+
+            {isAuthenticated ? (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={logout}>
+                Sign Out ({currentUser.fullName})
+              </button>
+            ) : (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={signInWithGoogle}>
+                Sign in with Google
+              </button>
+            )}
           </div>
         </div>
+        {authError && (
+          <div className="auth-error-banner" role="alert">
+            Authentication Notice: {authError}
+          </div>
+        )}
       </header>
 
       <main className="app-main">
