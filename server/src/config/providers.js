@@ -26,6 +26,12 @@ export const PROVIDER_CONFIG = Object.freeze({
     baseUrl: 'https://api.heigit.org/openrouteservice/v2/',
     supportedProfiles: ['driving-car', 'foot-walking', 'cycling-regular'],
     apiKeyEnvVar: 'OPENROUTESERVICE_API_KEY',
-    status: 'PLANNED_PHASE_4',
+    timeoutMs: 10000,
+    attribution: {
+      service: 'openrouteservice by HeiGIT',
+      url: 'https://openrouteservice.org/',
+      text: 'Route directions by openrouteservice (HeiGIT) • Map data © OpenStreetMap contributors',
+    },
+    status: 'ACTIVE_PHASE_4',
   },
 });

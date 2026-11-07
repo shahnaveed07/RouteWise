@@ -8,6 +8,7 @@ import {
   handleListTrips,
   handleUpdateTrip,
 } from '../controllers/tripController.js';
+import itineraryRoutes from './itineraryRoutes.js';
 
 const router = Router();
 
@@ -15,6 +16,7 @@ router.use(requireAuth);
 
 router.get('/', handleListTrips);
 router.post('/', handleCreateTrip);
+router.use('/:tripId/itinerary', itineraryRoutes);
 router.get('/:tripId', requireTripAccess, handleGetTrip);
 router.patch('/:tripId', requireTripAccess, requireTripOwner, handleUpdateTrip);
 router.delete('/:tripId', requireTripAccess, requireTripOwner, handleDeleteTrip);

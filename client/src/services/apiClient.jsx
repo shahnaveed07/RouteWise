@@ -58,9 +58,16 @@ export async function apiRequest(path, { method = 'GET', body, getAccessToken, s
   if (!response.ok) {
     const message =
       (payload && typeof payload.error === 'string' && payload.error) ||
+      (payload && typeof payload.message === 'string' && payload.message) ||
       `Request failed with status ${response.status}.`;
     const apiErr = new Error(message);
     apiErr.statusCode = response.status;
+    if (payload && payload.code) {
+      apiErr.code = payload.code;
+    }
+    if (payload && payload.details) {
+      apiErr.details = payload.details;
+    }
     throw apiErr;
   }
 

@@ -56,9 +56,41 @@ export function createTripAccessMiddleware({ fetchAccessibleTrip = getAccessible
     }
   };
 
-  return { requireTripAccess, requireTripOwner };
+  /**
+   * Verifies that the authenticated user is an authorized itinerary editor
+   * (`accessRole === 'owner'` or `accessRole === 'member'`).
+   * - If the user has no access to the trip (or the trip does not exist), returns 404.
+   * - If the user is a read-only viewer (`accessRole === 'viewer'`), returns 403 Forbidden.
+   */
+  const requireItineraryEditor = async (req, res, next) => {
+    const userId = req.dbUser?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized: Authenticated database user required.' });
+    }
+
+    const { tripId } = req.params;
+    try {
+      const trip = req.trip || (await fetchAccessibleTrip(tripId, userId));
+      if (!trip) {
+        return res.status(404).json({ error: 'Trip not found.' });
+      }
+      if (trip.accessRole !== 'owner' && trip.accessRole !== 'member') {
+        return res.status(403).json({
+          error:
+            'Forbidden: Viewers have read-only access and cannot initialize or modify itinerary records.',
+        });
+      }
+      req.trip = trip;
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  return { requireTripAccess, requireTripOwner, requireItineraryEditor };
 }
 
 const defaultMiddleware = createTripAccessMiddleware();
 export const requireTripAccess = defaultMiddleware.requireTripAccess;
 export const requireTripOwner = defaultMiddleware.requireTripOwner;
+export const requireItineraryEditor = defaultMiddleware.requireItineraryEditor;

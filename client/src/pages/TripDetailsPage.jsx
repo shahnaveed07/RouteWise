@@ -213,6 +213,13 @@ export default function TripDetailsPage() {
             <Link to="/dashboard" className="btn btn-secondary">
               Back to Dashboard
             </Link>
+            <Link
+              to={`/trips/${trip.id}/itinerary`}
+              className="btn btn-primary"
+              data-testid="open-itinerary-btn"
+            >
+              Open Trip Itinerary
+            </Link>
             {isOwner && !isEditing && (
               <>
                 <button
