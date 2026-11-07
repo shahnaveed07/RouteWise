@@ -1,6 +1,8 @@
 import express from 'express';
 import healthRoutes from './routes/healthRoutes.js';
+import locationRoutes from './routes/locationRoutes.js';
 import tripRoutes from './routes/tripRoutes.js';
+import weatherRoutes from './routes/weatherRoutes.js';
 import { requireAuth } from './middleware/auth.js';
 
 const app = express();
@@ -20,6 +22,10 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 
 // Protected Trip CRUD endpoints
 app.use('/api/trips', tripRoutes);
+
+// Protected Open-Meteo Geocoding & Weather adapter endpoints
+app.use('/api/locations', locationRoutes);
+app.use('/api/weather', weatherRoutes);
 
 // 404 handler for unknown /api/* endpoints
 app.use('/api', (req, res) => {

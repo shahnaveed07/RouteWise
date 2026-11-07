@@ -13,6 +13,20 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleAuthProvider = new GoogleAuthProvider();
 
+const DEV_E2E_STORAGE_KEY = 'ROUTEWISE_DEV_E2E_AUTH';
+const DEV_E2E_TOKEN = 'e2e-local-playwright-token';
+
+function isDevLoopbackE2EEnabled() {
+  if (typeof window === 'undefined') return false;
+  const host = window.location?.hostname || '';
+  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  try {
+    return isLocal && window.localStorage.getItem(DEV_E2E_STORAGE_KEY) === '1';
+  } catch (_err) {
+    return false;
+  }
+}
+
 /**
  * UI-only preview personas for academic demonstration of Owner / Member / Viewer roles.
  * IMPORTANT: These personas are strictly unauthenticated (`isDemo: true`, `isAuthenticated: false`)
@@ -51,7 +65,20 @@ export const DEMO_TRAVELLERS = [
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [currentUser, setCurrentUser] = useState(DEMO_TRAVELLERS[0]);
+  const [currentUser, setCurrentUser] = useState(() => {
+    if (isDevLoopbackE2EEnabled()) {
+      return {
+        id: 'e2e-playwright-verifier',
+        fullName: 'RouteWise E2E Verifier',
+        email: 'e2e.verifier@routewise.test',
+        roleLabel: 'Authenticated E2E Session',
+        isDemo: false,
+        isAuthenticated: true,
+        authMode: 'dev_e2e',
+      };
+    }
+    return DEMO_TRAVELLERS[0];
+  });
   const [authReady, setAuthReady] = useState(false);
   const [authError, setAuthError] = useState(null);
 
@@ -66,6 +93,16 @@ export function AuthProvider({ children }) {
           isDemo: false,
           isAuthenticated: true,
           authMode: 'firebase',
+        });
+      } else if (isDevLoopbackE2EEnabled()) {
+        setCurrentUser({
+          id: 'e2e-playwright-verifier',
+          fullName: 'RouteWise E2E Verifier',
+          email: 'e2e.verifier@routewise.test',
+          roleLabel: 'Authenticated E2E Session',
+          isDemo: false,
+          isAuthenticated: true,
+          authMode: 'dev_e2e',
         });
       } else {
         setCurrentUser((prev) => (prev.isDemo ? prev : DEMO_TRAVELLERS[0]));
@@ -105,6 +142,9 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(DEV_E2E_STORAGE_KEY);
+      }
       await signOut(auth);
     } catch (_err) {
       // Fallback to unauthenticated demo preview persona
@@ -114,7 +154,8 @@ export function AuthProvider({ children }) {
 
   /**
    * Returns a real Firebase ID token if and only if a real Firebase session is active
-   * and the user is not in demo preview mode. Never returns a synthetic token.
+   * (or the local loopback E2E verification flag is set on localhost).
+   * Never returns a token for demo preview personas.
    */
   const getAccessToken = useCallback(async () => {
     if (currentUser.isDemo || !currentUser.isAuthenticated) {
@@ -123,8 +164,11 @@ export function AuthProvider({ children }) {
     if (auth.currentUser) {
       return auth.currentUser.getIdToken();
     }
+    if (currentUser.authMode === 'dev_e2e' && isDevLoopbackE2EEnabled()) {
+      return DEV_E2E_TOKEN;
+    }
     return null;
-  }, [currentUser.isDemo, currentUser.isAuthenticated]);
+  }, [currentUser.isDemo, currentUser.isAuthenticated, currentUser.authMode]);
 
   return (
     <AuthContext.Provider

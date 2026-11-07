@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { hasValidCoordinates } from '../services/mapConfig.jsx';
+import DestinationSearch from './DestinationSearch.jsx';
+import MapView from './MapView.jsx';
 
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const CURRENCY_REGEX = /^[A-Z]{3}$/;
@@ -26,6 +29,12 @@ export default function TripForm({
 }) {
   const [title, setTitle] = useState(initialValues.title || '');
   const [destinationName, setDestinationName] = useState(initialValues.destinationName || '');
+  const [destinationLatitude, setDestinationLatitude] = useState(
+    initialValues.destinationLatitude ?? null
+  );
+  const [destinationLongitude, setDestinationLongitude] = useState(
+    initialValues.destinationLongitude ?? null
+  );
   const [description, setDescription] = useState(initialValues.description || '');
   const [startDate, setStartDate] = useState(initialValues.startDate || '');
   const [endDate, setEndDate] = useState(initialValues.endDate || '');
@@ -36,6 +45,21 @@ export default function TripForm({
       : '0.00'
   );
   const [fieldErrors, setFieldErrors] = useState({});
+
+  const coordsConfirmed = hasValidCoordinates(destinationLatitude, destinationLongitude);
+
+  const handleDestinationChange = ({
+    destinationName: nextName,
+    destinationLatitude: nextLat,
+    destinationLongitude: nextLon,
+  }) => {
+    setDestinationName(nextName);
+    setDestinationLatitude(nextLat);
+    setDestinationLongitude(nextLon);
+    if (fieldErrors.destinationName) {
+      setFieldErrors((prev) => ({ ...prev, destinationName: undefined }));
+    }
+  };
 
   const validateFields = () => {
     const errors = {};
@@ -82,6 +106,8 @@ export default function TripForm({
       payload: {
         title: trimmedTitle,
         destinationName: trimmedDest,
+        destinationLatitude: coordsConfirmed ? Number(destinationLatitude) : null,
+        destinationLongitude: coordsConfirmed ? Number(destinationLongitude) : null,
         description: trimmedDesc.length > 0 ? trimmedDesc : null,
         startDate,
         endDate,
@@ -109,57 +135,56 @@ export default function TripForm({
         </div>
       )}
 
+      <div className="form-field form-field-bottom-gap">
+        <label htmlFor="trip-title" className="form-label">
+          Trip Title <span aria-hidden="true">*</span>
+        </label>
+        <input
+          id="trip-title"
+          name="title"
+          type="text"
+          className={fieldErrors.title ? 'form-input form-input-error' : 'form-input'}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={150}
+          placeholder="e.g. Kashmir Autumn Expedition"
+          required
+          disabled={isSubmitting}
+          aria-invalid={Boolean(fieldErrors.title)}
+          aria-describedby={fieldErrors.title ? 'trip-title-error' : undefined}
+        />
+        {fieldErrors.title && (
+          <p id="trip-title-error" className="field-error" role="alert">
+            {fieldErrors.title}
+          </p>
+        )}
+      </div>
+
+      <div className="form-field form-field-bottom-gap">
+        <DestinationSearch
+          value={destinationName}
+          latitude={destinationLatitude}
+          longitude={destinationLongitude}
+          onDestinationChange={handleDestinationChange}
+          disabled={isSubmitting}
+          error={fieldErrors.destinationName}
+          inputId="trip-destination"
+        />
+      </div>
+
+      {coordsConfirmed && (
+        <div className="form-map-preview-block">
+          <div className="form-label">Selected Destination Map Preview</div>
+          <MapView
+            latitude={destinationLatitude}
+            longitude={destinationLongitude}
+            destinationName={destinationName}
+            compact
+          />
+        </div>
+      )}
+
       <div className="form-grid">
-        <div className="form-field">
-          <label htmlFor="trip-title" className="form-label">
-            Trip Title <span aria-hidden="true">*</span>
-          </label>
-          <input
-            id="trip-title"
-            name="title"
-            type="text"
-            className={fieldErrors.title ? 'form-input form-input-error' : 'form-input'}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            maxLength={150}
-            placeholder="e.g. Kashmir Autumn Expedition"
-            required
-            disabled={isSubmitting}
-            aria-invalid={Boolean(fieldErrors.title)}
-            aria-describedby={fieldErrors.title ? 'trip-title-error' : undefined}
-          />
-          {fieldErrors.title && (
-            <p id="trip-title-error" className="field-error" role="alert">
-              {fieldErrors.title}
-            </p>
-          )}
-        </div>
-
-        <div className="form-field">
-          <label htmlFor="trip-destination" className="form-label">
-            Destination <span aria-hidden="true">*</span>
-          </label>
-          <input
-            id="trip-destination"
-            name="destinationName"
-            type="text"
-            className={fieldErrors.destinationName ? 'form-input form-input-error' : 'form-input'}
-            value={destinationName}
-            onChange={(e) => setDestinationName(e.target.value)}
-            maxLength={180}
-            placeholder="e.g. Srinagar, Gulmarg & Pahalgam"
-            required
-            disabled={isSubmitting}
-            aria-invalid={Boolean(fieldErrors.destinationName)}
-            aria-describedby={fieldErrors.destinationName ? 'trip-destination-error' : undefined}
-          />
-          {fieldErrors.destinationName && (
-            <p id="trip-destination-error" className="field-error" role="alert">
-              {fieldErrors.destinationName}
-            </p>
-          )}
-        </div>
-
         <div className="form-field">
           <label htmlFor="trip-start-date" className="form-label">
             Start Date <span aria-hidden="true">*</span>

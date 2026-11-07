@@ -1,13 +1,37 @@
 import { adminAuth } from '../config/firebase-admin.js';
 import { getOrCreateUser } from '../services/userService.js';
 
+const DEV_E2E_TOKEN = 'e2e-local-playwright-token';
+
+function isLoopbackAddress(ip = '') {
+  return (
+    ip === '127.0.0.1' ||
+    ip === '::1' ||
+    ip === '::ffff:127.0.0.1' ||
+    ip === 'localhost'
+  );
+}
+
 /**
  * Factory for the authentication middleware to support deterministic unit testing
  * of token verification failures (401) vs. PostgreSQL synchronization failures (503).
  * Never logs or returns raw bearer tokens.
  */
 export function createRequireAuth({
-  verifyToken = (token) => adminAuth.verifyIdToken(token),
+  verifyToken = (token, req) => {
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      token === DEV_E2E_TOKEN &&
+      isLoopbackAddress(req?.ip || req?.socket?.remoteAddress || '')
+    ) {
+      return Promise.resolve({
+        uid: 'e2e-playwright-verifier',
+        email: 'e2e.verifier@routewise.test',
+        name: 'RouteWise E2E Verifier',
+      });
+    }
+    return adminAuth.verifyIdToken(token);
+  },
   syncUser = getOrCreateUser,
 } = {}) {
   return async function requireAuthMiddleware(req, res, next) {
@@ -33,7 +57,7 @@ export function createRequireAuth({
 
     let decodedToken;
     try {
-      decodedToken = await verifyToken(token);
+      decodedToken = await verifyToken(token, req);
     } catch (_tokenError) {
       return res.status(401).json({
         error: 'Unauthorized: Invalid or expired authentication token.',

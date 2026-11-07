@@ -9,6 +9,8 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const ALLOWED_UPDATE_COLUMNS = Object.freeze({
   title: 'title',
   destinationName: 'destination_name',
+  destinationLatitude: 'destination_latitude',
+  destinationLongitude: 'destination_longitude',
   description: 'description',
   startDate: 'start_date',
   endDate: 'end_date',
@@ -20,6 +22,14 @@ export function isValidUuid(value) {
   return typeof value === 'string' && UUID_REGEX.test(value.trim());
 }
 
+function parseNullableCoordinate(raw) {
+  if (raw === null || raw === undefined || raw === '') {
+    return null;
+  }
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : null;
+}
+
 function mapTripRow(row) {
   if (!row) return null;
   return {
@@ -27,6 +37,8 @@ function mapTripRow(row) {
     ownerUserId: row.ownerUserId,
     title: row.title,
     destinationName: row.destinationName,
+    destinationLatitude: parseNullableCoordinate(row.destinationLatitude),
+    destinationLongitude: parseNullableCoordinate(row.destinationLongitude),
     description: row.description ?? null,
     startDate: row.startDate,
     endDate: row.endDate,
@@ -52,6 +64,8 @@ export async function listTripsForUser(userId, queryFn = query) {
       t.owner_user_id AS "ownerUserId",
       t.title,
       t.destination_name AS "destinationName",
+      t.destination_latitude AS "destinationLatitude",
+      t.destination_longitude AS "destinationLongitude",
       t.description,
       TO_CHAR(t.start_date, 'YYYY-MM-DD') AS "startDate",
       TO_CHAR(t.end_date, 'YYYY-MM-DD') AS "endDate",
@@ -98,6 +112,8 @@ export async function createTrip(ownerUserId, tripData, queryFn = query) {
       owner_user_id,
       title,
       destination_name,
+      destination_latitude,
+      destination_longitude,
       description,
       start_date,
       end_date,
@@ -106,12 +122,27 @@ export async function createTrip(ownerUserId, tripData, queryFn = query) {
       created_at,
       updated_at
     )
-    VALUES ($1, $2, $3, $4, $5::date, $6::date, $7, $8::numeric(12,2), NOW(), NOW())
+    VALUES (
+      $1,
+      $2,
+      $3,
+      $4::numeric(9,6),
+      $5::numeric(9,6),
+      $6,
+      $7::date,
+      $8::date,
+      $9,
+      $10::numeric(12,2),
+      NOW(),
+      NOW()
+    )
     RETURNING
       id,
       owner_user_id AS "ownerUserId",
       title,
       destination_name AS "destinationName",
+      destination_latitude AS "destinationLatitude",
+      destination_longitude AS "destinationLongitude",
       description,
       TO_CHAR(start_date, 'YYYY-MM-DD') AS "startDate",
       TO_CHAR(end_date, 'YYYY-MM-DD') AS "endDate",
@@ -126,6 +157,8 @@ export async function createTrip(ownerUserId, tripData, queryFn = query) {
     ownerUserId,
     tripData.title,
     tripData.destinationName,
+    tripData.destinationLatitude ?? null,
+    tripData.destinationLongitude ?? null,
     tripData.description ?? null,
     tripData.startDate,
     tripData.endDate,
@@ -151,6 +184,8 @@ export async function getAccessibleTripById(tripId, userId, queryFn = query) {
       t.owner_user_id AS "ownerUserId",
       t.title,
       t.destination_name AS "destinationName",
+      t.destination_latitude AS "destinationLatitude",
+      t.destination_longitude AS "destinationLongitude",
       t.description,
       TO_CHAR(t.start_date, 'YYYY-MM-DD') AS "startDate",
       TO_CHAR(t.end_date, 'YYYY-MM-DD') AS "endDate",
@@ -206,6 +241,8 @@ export async function updateTripById(tripId, ownerUserId, updates, queryFn = que
         setClauses.push(`${columnName} = $${paramIndex}::date`);
       } else if (fieldKey === 'plannedBudget') {
         setClauses.push(`${columnName} = $${paramIndex}::numeric(12,2)`);
+      } else if (fieldKey === 'destinationLatitude' || fieldKey === 'destinationLongitude') {
+        setClauses.push(`${columnName} = $${paramIndex}::numeric(9,6)`);
       } else {
         setClauses.push(`${columnName} = $${paramIndex}`);
       }
@@ -234,6 +271,8 @@ export async function updateTripById(tripId, ownerUserId, updates, queryFn = que
       owner_user_id AS "ownerUserId",
       title,
       destination_name AS "destinationName",
+      destination_latitude AS "destinationLatitude",
+      destination_longitude AS "destinationLongitude",
       description,
       TO_CHAR(start_date, 'YYYY-MM-DD') AS "startDate",
       TO_CHAR(end_date, 'YYYY-MM-DD') AS "endDate",

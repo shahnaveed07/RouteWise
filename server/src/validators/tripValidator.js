@@ -71,6 +71,54 @@ export function normalizePlannedBudget(rawBudget) {
 }
 
 /**
+ * Validates a paired WGS84 coordinate set (destinationLatitude, destinationLongitude).
+ * Either both must be null/omitted OR both must be finite numbers in [-90, 90] and [-180, 180].
+ */
+export function normalizeCoordinatePair(rawLat, rawLon) {
+  const latEmpty = rawLat === undefined || rawLat === null || rawLat === '';
+  const lonEmpty = rawLon === undefined || rawLon === null || rawLon === '';
+
+  if (latEmpty && lonEmpty) {
+    return {
+      valid: true,
+      destinationLatitude: null,
+      destinationLongitude: null,
+    };
+  }
+
+  if (latEmpty !== lonEmpty) {
+    return {
+      valid: false,
+      error:
+        'destinationLatitude and destinationLongitude must be provided together as a coordinate pair or both set to null.',
+    };
+  }
+
+  const latNum = typeof rawLat === 'number' ? rawLat : Number(String(rawLat).trim());
+  const lonNum = typeof rawLon === 'number' ? rawLon : Number(String(rawLon).trim());
+
+  if (!Number.isFinite(latNum) || latNum < -90 || latNum > 90) {
+    return {
+      valid: false,
+      error: 'destinationLatitude must be a valid number between -90 and 90.',
+    };
+  }
+
+  if (!Number.isFinite(lonNum) || lonNum < -180 || lonNum > 180) {
+    return {
+      valid: false,
+      error: 'destinationLongitude must be a valid number between -180 and 180.',
+    };
+  }
+
+  return {
+    valid: true,
+    destinationLatitude: Number(latNum.toFixed(6)),
+    destinationLongitude: Number(lonNum.toFixed(6)),
+  };
+}
+
+/**
  * Validates payload for POST /api/trips.
  * Strictly ignores any client-supplied identity or audit fields (ownerUserId, id, etc.).
  */
@@ -150,11 +198,21 @@ export function validateCreateTripInput(body) {
     return { valid: false, error: budgetCheck.error };
   }
 
+  const coordsCheck = normalizeCoordinatePair(
+    body.destinationLatitude,
+    body.destinationLongitude
+  );
+  if (!coordsCheck.valid) {
+    return { valid: false, error: coordsCheck.error };
+  }
+
   return {
     valid: true,
     data: {
       title,
       destinationName,
+      destinationLatitude: coordsCheck.destinationLatitude,
+      destinationLongitude: coordsCheck.destinationLongitude,
       description,
       startDate,
       endDate,
@@ -166,7 +224,7 @@ export function validateCreateTripInput(body) {
 
 /**
  * Validates payload for PATCH /api/trips/:tripId against the existing trip record.
- * Enforces date range consistency even when only one date field is modified.
+ * Enforces date range consistency and paired coordinate consistency.
  */
 export function validateUpdateTripInput(body, existingTrip) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -196,6 +254,27 @@ export function validateUpdateTripInput(body, existingTrip) {
       };
     }
     updates.destinationName = destinationName;
+  }
+
+  const hasLat = Object.prototype.hasOwnProperty.call(body, 'destinationLatitude');
+  const hasLon = Object.prototype.hasOwnProperty.call(body, 'destinationLongitude');
+  if (hasLat || hasLon) {
+    if (hasLat !== hasLon) {
+      return {
+        valid: false,
+        error:
+          'destinationLatitude and destinationLongitude must be updated together as a coordinate pair.',
+      };
+    }
+    const coordsCheck = normalizeCoordinatePair(
+      body.destinationLatitude,
+      body.destinationLongitude
+    );
+    if (!coordsCheck.valid) {
+      return { valid: false, error: coordsCheck.error };
+    }
+    updates.destinationLatitude = coordsCheck.destinationLatitude;
+    updates.destinationLongitude = coordsCheck.destinationLongitude;
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'description')) {
@@ -265,7 +344,7 @@ export function validateUpdateTripInput(body, existingTrip) {
     return {
       valid: false,
       error:
-        'At least one editable trip field (title, destinationName, description, startDate, endDate, currency, plannedBudget) must be provided.',
+        'At least one editable trip field (title, destinationName, destinationLatitude/destinationLongitude, description, startDate, endDate, currency, plannedBudget) must be provided.',
     };
   }
 

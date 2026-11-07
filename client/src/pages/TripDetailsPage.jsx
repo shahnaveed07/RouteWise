@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
+import DestinationSearch from '../components/DestinationSearch.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import ErrorState from '../components/ErrorState.jsx';
 import LoadingState from '../components/LoadingState.jsx';
+import MapView from '../components/MapView.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import TripForm from '../components/TripForm.jsx';
+import WeatherCard from '../components/WeatherCard.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import {
   deleteTripRequest,
   fetchTripById,
   updateTripRequest,
 } from '../services/apiClient.jsx';
+import { hasValidCoordinates } from '../services/mapConfig.jsx';
 
 export default function TripDetailsPage() {
   const { tripId } = useParams();
@@ -33,6 +37,13 @@ export default function TripDetailsPage() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateError, setUpdateError] = useState(null);
 
+  const [isResolvingLocation, setIsResolvingLocation] = useState(false);
+  const [pendingLocation, setPendingLocation] = useState({
+    destinationName: '',
+    destinationLatitude: null,
+    destinationLongitude: null,
+  });
+
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
@@ -52,6 +63,11 @@ export default function TripDetailsPage() {
     try {
       const loadedTrip = await fetchTripById(getAccessToken, tripId);
       setTrip(loadedTrip);
+      setPendingLocation({
+        destinationName: loadedTrip?.destinationName || '',
+        destinationLatitude: loadedTrip?.destinationLatitude ?? null,
+        destinationLongitude: loadedTrip?.destinationLongitude ?? null,
+      });
     } catch (err) {
       setLoadError(err.message || 'Unable to load trip details.');
     } finally {
@@ -75,12 +91,32 @@ export default function TripDetailsPage() {
       const savedTrip = await updateTripRequest(getAccessToken, trip.id, updatedFields);
       setTrip(savedTrip);
       setIsEditing(false);
+      setIsResolvingLocation(false);
       setStatusMessage('Trip details updated in PostgreSQL.');
     } catch (err) {
       setUpdateError(err.message || 'Unable to update trip details.');
     } finally {
       setIsUpdating(false);
     }
+  };
+
+  const handleSaveResolvedLocation = async (event) => {
+    event.preventDefault();
+    if (
+      !hasValidCoordinates(
+        pendingLocation.destinationLatitude,
+        pendingLocation.destinationLongitude
+      )
+    ) {
+      setUpdateError('Please select a geocoded destination from the search results first.');
+      return;
+    }
+
+    await handleUpdateTrip({
+      destinationName: pendingLocation.destinationName.trim(),
+      destinationLatitude: pendingLocation.destinationLatitude,
+      destinationLongitude: pendingLocation.destinationLongitude,
+    });
   };
 
   const handleDeleteTrip = async () => {
@@ -156,6 +192,10 @@ export default function TripDetailsPage() {
   }
 
   const isOwner = trip.accessRole === 'owner';
+  const coordsConfirmed = hasValidCoordinates(
+    trip.destinationLatitude,
+    trip.destinationLongitude
+  );
   const roleLabel =
     trip.accessRole === 'owner'
       ? 'Owner (Full Access)'
@@ -244,46 +284,157 @@ export default function TripDetailsPage() {
           />
         </section>
       ) : (
-        <section className="card trip-details-card" aria-label="Trip summary details">
-          <div className="trip-details-top">
-            <span className={`role-badge role-badge-${trip.accessRole || 'owner'}`}>
-              {roleLabel}
-            </span>
-            {!isOwner && (
-              <span className="readonly-note">
-                Only the trip owner can edit or delete trip metadata.
-              </span>
-            )}
-          </div>
+        <>
+          <section className="card trip-details-card" aria-label="Trip summary details">
+            <div className="trip-details-top">
+              <div className="trip-badges-row">
+                <span className={`role-badge role-badge-${trip.accessRole || 'owner'}`}>
+                  {roleLabel}
+                </span>
+                <span
+                  className={
+                    coordsConfirmed
+                      ? 'coord-status-badge coord-status-verified'
+                      : 'coord-status-badge coord-status-unverified'
+                  }
+                >
+                  {coordsConfirmed
+                    ? `Coordinates: ${Number(trip.destinationLatitude).toFixed(4)}°, ${Number(trip.destinationLongitude).toFixed(4)}°`
+                    : 'Destination Coordinates Not Confirmed'}
+                </span>
+              </div>
+              {!isOwner && (
+                <span className="readonly-note">
+                  Only the trip owner can edit or delete trip metadata.
+                </span>
+              )}
+            </div>
 
-          <dl className="trip-details-grid">
-            <div className="detail-item">
-              <dt>Destination</dt>
-              <dd>{trip.destinationName}</dd>
-            </div>
-            <div className="detail-item">
-              <dt>Start Date</dt>
-              <dd>{trip.startDate}</dd>
-            </div>
-            <div className="detail-item">
-              <dt>End Date</dt>
-              <dd>{trip.endDate}</dd>
-            </div>
-            <div className="detail-item">
-              <dt>Planned Budget</dt>
-              <dd className="trip-budget-value">
-                {trip.currency} {trip.plannedBudget}
-              </dd>
-            </div>
-          </dl>
+            <dl className="trip-details-grid">
+              <div className="detail-item">
+                <dt>Destination</dt>
+                <dd>{trip.destinationName}</dd>
+              </div>
+              <div className="detail-item">
+                <dt>Start Date</dt>
+                <dd>{trip.startDate}</dd>
+              </div>
+              <div className="detail-item">
+                <dt>End Date</dt>
+                <dd>{trip.endDate}</dd>
+              </div>
+              <div className="detail-item">
+                <dt>Planned Budget</dt>
+                <dd className="trip-budget-value">
+                  {trip.currency} {trip.plannedBudget}
+                </dd>
+              </div>
+            </dl>
 
-          <div className="detail-description-block">
-            <h3 className="detail-subheading">Description & Planning Notes</h3>
-            <p className="detail-description-text">
-              {trip.description || 'No description provided for this trip.'}
-            </p>
+            <div className="detail-description-block">
+              <h3 className="detail-subheading">Description & Planning Notes</h3>
+              <p className="detail-description-text">
+                {trip.description || 'No description provided for this trip.'}
+              </p>
+            </div>
+          </section>
+
+          <div className="trip-insights-grid">
+            <section className="card trip-insight-panel" aria-label="Destination Map">
+              <div className="insight-panel-header">
+                <h2 className="section-heading" style={{ margin: 0 }}>
+                  Destination Map
+                </h2>
+                {isOwner && !coordsConfirmed && !isResolvingLocation && (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => {
+                      setUpdateError(null);
+                      setPendingLocation({
+                        destinationName: trip.destinationName,
+                        destinationLatitude: null,
+                        destinationLongitude: null,
+                      });
+                      setIsResolvingLocation(true);
+                    }}
+                  >
+                    + Confirm Destination Location
+                  </button>
+                )}
+              </div>
+
+              {isOwner && !coordsConfirmed && isResolvingLocation && (
+                <form className="resolve-location-box" onSubmit={handleSaveResolvedLocation}>
+                  {updateError && (
+                    <div className="form-alert form-alert-error" role="alert">
+                      {updateError}
+                    </div>
+                  )}
+                  <DestinationSearch
+                    value={pendingLocation.destinationName}
+                    latitude={pendingLocation.destinationLatitude}
+                    longitude={pendingLocation.destinationLongitude}
+                    onDestinationChange={setPendingLocation}
+                    disabled={isUpdating}
+                    inputId="resolve-trip-destination"
+                    label="Search & Select Destination to Attach Coordinates"
+                  />
+                  <div className="form-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        setUpdateError(null);
+                        setIsResolvingLocation(false);
+                      }}
+                      disabled={isUpdating}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn btn-primary btn-sm"
+                      disabled={
+                        isUpdating ||
+                        !hasValidCoordinates(
+                          pendingLocation.destinationLatitude,
+                          pendingLocation.destinationLongitude
+                        )
+                      }
+                    >
+                      {isUpdating ? 'Saving...' : 'Save Confirmed Coordinates'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              <MapView
+                latitude={trip.destinationLatitude}
+                longitude={trip.destinationLongitude}
+                destinationName={trip.destinationName}
+                emptyMessage={
+                  isOwner
+                    ? 'This trip does not have verified coordinates yet. Click "+ Confirm Destination Location" above or "Edit Trip" to search and select a geocoded destination.'
+                    : 'The trip owner has not attached verified map coordinates to this destination yet.'
+                }
+              />
+            </section>
+
+            <section className="card trip-insight-panel" aria-label="Destination Weather">
+              <div className="insight-panel-header">
+                <h2 className="section-heading" style={{ margin: 0 }}>
+                  Destination Weather
+                </h2>
+              </div>
+              <WeatherCard
+                latitude={trip.destinationLatitude}
+                longitude={trip.destinationLongitude}
+                destinationName={trip.destinationName}
+              />
+            </section>
           </div>
-        </section>
+        </>
       )}
     </div>
   );

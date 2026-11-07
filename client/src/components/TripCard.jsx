@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { hasValidCoordinates } from '../services/mapConfig.jsx';
 
 export default function TripCard({ trip }) {
   const roleLabel =
@@ -7,6 +8,8 @@ export default function TripCard({ trip }) {
       : trip.accessRole === 'member'
         ? 'Member'
         : 'Viewer';
+
+  const coordsValid = hasValidCoordinates(trip.destinationLatitude, trip.destinationLongitude);
 
   return (
     <article className="card trip-card">
@@ -42,6 +45,15 @@ export default function TripCard({ trip }) {
       {trip.description && <p className="trip-card-description">{trip.description}</p>}
 
       <div className="trip-card-footer">
+        <span
+          className={
+            coordsValid
+              ? 'coord-status-badge coord-status-verified'
+              : 'coord-status-badge coord-status-unverified'
+          }
+        >
+          {coordsValid ? 'Map & Weather Ready' : 'Location Unverified'}
+        </span>
         <Link to={`/trips/${trip.id}`} className="btn btn-secondary btn-sm">
           View Trip Details
         </Link>

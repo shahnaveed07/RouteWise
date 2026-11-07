@@ -171,6 +171,33 @@ test('tripValidator strips client-supplied ownerUserId/id and enforces PATCH sin
   );
   assert.equal(badStartDatePatch.valid, false);
   assert.match(badStartDatePatch.error, /endDate must be on or after startDate/i);
+
+  // Unpaired or out-of-range coordinates must fail
+  assert.equal(
+    validateCreateTripInput({
+      title: 'Ladakh Trip',
+      destinationName: 'Leh',
+      destinationLatitude: 34.1526,
+      startDate: '2026-11-10',
+      endDate: '2026-11-15',
+    }).valid,
+    false
+  );
+  assert.equal(
+    validateCreateTripInput({
+      title: 'Ladakh Trip',
+      destinationName: 'Leh',
+      destinationLatitude: 95,
+      destinationLongitude: 77.577,
+      startDate: '2026-11-10',
+      endDate: '2026-11-15',
+    }).valid,
+    false
+  );
+  assert.equal(
+    validateUpdateTripInput({ destinationLatitude: 34.083656 }, existingTrip).valid,
+    false
+  );
 });
 
 test('live PostgreSQL integration: create, list (owned + active shared, excluding pending/unrelated), read, owner update/delete, member/viewer 403, outsider 404, and FK cascade', async (t) => {
@@ -352,12 +379,14 @@ test('live PostgreSQL integration: create, list (owned + active shared, excludin
   await requireTripAccess(outsiderReq, outsiderRes, () => {});
   assert.equal(outsiderRes.statusCode, 404);
 
-  // 6. Owner can update trip details via handleUpdateTrip
+  // 6. Owner can update trip details and attach geocoded destination coordinates via handleUpdateTrip
   const ownerUpdateReq = {
     dbUser: ownerUser,
     trip: createdTrip,
     body: {
       title: `P2 Updated Trip ${runId}`,
+      destinationLatitude: 34.0484,
+      destinationLongitude: 74.3805,
       plannedBudget: '22000.75',
     },
   };
@@ -368,6 +397,8 @@ test('live PostgreSQL integration: create, list (owned + active shared, excludin
   assert.equal(ownerUpdateRes.statusCode, 200);
   assert.equal(ownerUpdateRes.body.trip.title, `P2 Updated Trip ${runId}`);
   assert.equal(ownerUpdateRes.body.trip.plannedBudget, '22000.75');
+  assert.equal(ownerUpdateRes.body.trip.destinationLatitude, 34.0484);
+  assert.equal(ownerUpdateRes.body.trip.destinationLongitude, 74.3805);
 
   // 7. Owner can delete trip via handleDeleteTrip and FK ON DELETE CASCADE removes dependent trip_members
   const ownerDeleteReq = {

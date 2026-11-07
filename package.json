@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "test": "node --test server/tests/*.test.js",
-    "lint": "node --check server/server.js && node --check server/src/app.js && node --check server/src/config/db.js && node --check server/src/middleware/auth.js && node --check server/src/middleware/tripAccess.js && node --check server/src/services/userService.js && node --check server/src/services/tripService.js && node --check server/src/controllers/tripController.js && node --check server/src/routes/tripRoutes.js && node --check server/src/validators/tripValidator.js"
+    "lint": "node --check server/server.js && node --check server/src/app.js && node --check server/src/config/db.js && node --check server/src/config/providers.js && node --check server/src/middleware/auth.js && node --check server/src/middleware/tripAccess.js && node --check server/src/services/userService.js && node --check server/src/services/tripService.js && node --check server/src/services/geocodingService.js && node --check server/src/services/weatherService.js && node --check server/src/controllers/tripController.js && node --check server/src/controllers/locationController.js && node --check server/src/controllers/weatherController.js && node --check server/src/routes/tripRoutes.js && node --check server/src/routes/locationRoutes.js && node --check server/src/routes/weatherRoutes.js && node --check server/src/validators/tripValidator.js && node --check server/src/validators/locationValidator.js && node --check server/src/validators/weatherValidator.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.1.1",
