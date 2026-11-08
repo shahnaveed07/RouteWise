@@ -523,6 +523,13 @@ export default function ItineraryPage() {
             >
               ← Back to Trip Details
             </Link>
+            <Link
+              to={`/trips/${trip.id}/expenses`}
+              className="btn btn-secondary"
+              data-testid="open-expenses-from-itinerary-btn"
+            >
+              Budget &amp; Expenses
+            </Link>
             {canEdit && (
               <button
                 type="button"

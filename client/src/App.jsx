@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext.jsx';
 import AppShell from './layouts/AppShell.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
+import ExpensesPage from './pages/ExpensesPage.jsx';
 import ItineraryPage from './pages/ItineraryPage.jsx';
 import NewTripPage from './pages/NewTripPage.jsx';
 import TripDetailsPage from './pages/TripDetailsPage.jsx';
@@ -16,6 +17,7 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/trips/new" element={<NewTripPage />} />
             <Route path="/trips/:tripId/itinerary" element={<ItineraryPage />} />
+            <Route path="/trips/:tripId/expenses" element={<ExpensesPage />} />
             <Route path="/trips/:tripId" element={<TripDetailsPage />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>

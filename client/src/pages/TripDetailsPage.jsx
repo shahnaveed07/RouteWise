@@ -220,6 +220,13 @@ export default function TripDetailsPage() {
             >
               Open Trip Itinerary
             </Link>
+            <Link
+              to={`/trips/${trip.id}/expenses`}
+              className="btn btn-primary"
+              data-testid="open-expenses-btn"
+            >
+              Trip Budget &amp; Expenses
+            </Link>
             {isOwner && !isEditing && (
               <>
                 <button

@@ -9,6 +9,7 @@ import {
   handleUpdateTrip,
 } from '../controllers/tripController.js';
 import itineraryRoutes from './itineraryRoutes.js';
+import expenseRoutes from './expenseRoutes.js';
 
 const router = Router();
 
@@ -17,8 +18,10 @@ router.use(requireAuth);
 router.get('/', handleListTrips);
 router.post('/', handleCreateTrip);
 router.use('/:tripId/itinerary', itineraryRoutes);
+router.use('/:tripId/expenses', expenseRoutes);
 router.get('/:tripId', requireTripAccess, handleGetTrip);
 router.patch('/:tripId', requireTripAccess, requireTripOwner, handleUpdateTrip);
 router.delete('/:tripId', requireTripAccess, requireTripOwner, handleDeleteTrip);
 
 export default router;
+
