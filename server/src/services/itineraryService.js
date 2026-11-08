@@ -86,7 +86,7 @@ export function mapItineraryItemRow(row) {
   };
 }
 
-export function mapItineraryDayRow(row, items = []) {
+export function mapItineraryDayRow(row, items = [], tripRange = null) {
   const orderedItems = [...items].sort((a, b) => a.sortOrder - b.sortOrder);
   const estimatedCost = sumDecimalStrings(
     orderedItems.map((item) => item.estimatedCost)
@@ -94,16 +94,25 @@ export function mapItineraryDayRow(row, items = []) {
   const geocodedStopCount = orderedItems.filter(
     (item) => item.place && item.place.hasCoordinates
   ).length;
+  const dayDate = formatDateOnly(row.day_date);
+  const isOutsideTripRange = Boolean(
+    tripRange &&
+      tripRange.startDate &&
+      tripRange.endDate &&
+      dayDate &&
+      (dayDate < tripRange.startDate || dayDate > tripRange.endDate)
+  );
 
   return {
     id: row.id,
     tripId: row.trip_id,
-    dayDate: formatDateOnly(row.day_date),
+    dayDate,
     dayOrder: Number(row.day_order),
     notes: row.notes || null,
     estimatedCost,
     itemCount: orderedItems.length,
     geocodedStopCount,
+    isOutsideTripRange,
     items: orderedItems,
   };
 }
@@ -173,21 +182,90 @@ export async function upsertPlace(placeData, dbClient = null) {
 }
 
 /**
- * Idempotently initializes `itinerary_days` for every date from trip.startDate to trip.endDate.
- * Preserves existing days, notes, and attached itinerary_items.
+ * Safely initializes or reconciles `itinerary_days` for every date from trip.startDate to trip.endDate.
+ * - Inspects out-of-range days BEFORE modifying any day_order or deleting rows.
+ * - Rejects with HTTP 409 (`ITINERARY_OUTSIDE_RANGE_HAS_DATA`) and rolls back if any out-of-range day
+ *   contains scheduled activities or non-empty notes.
+ * - Deletes only safely empty out-of-range days (neither activities nor notes).
+ * - Preserves existing in-range days, notes, and attached itinerary_items, and renumbers 1..N.
  */
 export async function initializeTripItinerary(trip) {
-  const startDate = trip.startDate || trip.start_date;
-  const endDate = trip.endDate || trip.end_date;
+  const startDate = formatDateOnly(trip.startDate || trip.start_date);
+  const endDate = formatDateOnly(trip.endDate || trip.end_date);
   const dateRange = generateDateRange(startDate, endDate);
   if (dateRange.length === 0) {
     const err = new Error('Trip date range is invalid for itinerary initialization.');
     err.status = 400;
+    err.code = 'INVALID_TRIP_DATE_RANGE';
     throw err;
   }
 
+  const dateRangeSet = new Set(dateRange);
+
   await withTransaction(async (client) => {
-    // Shift existing day_order values to a positive temporary offset to avoid uq_itinerary_days_trip_order collisions
+    // 1. Inspect all existing itinerary days for this trip BEFORE any day_order shift or deletion
+    const existingDaysRes = await client.query(
+      `SELECT
+         d.id,
+         d.day_date,
+         d.day_order,
+         d.notes,
+         COUNT(i.id)::int AS item_count
+       FROM itinerary_days d
+       LEFT JOIN itinerary_items i ON i.itinerary_day_id = d.id
+       WHERE d.trip_id = $1
+       GROUP BY d.id, d.day_date, d.day_order, d.notes
+       ORDER BY d.day_date ASC, d.id ASC`,
+      [trip.id]
+    );
+
+    const outOfRangeDays = [];
+    for (const row of existingDaysRes.rows) {
+      const dayDateStr = formatDateOnly(row.day_date);
+      if (!dateRangeSet.has(dayDateStr)) {
+        const itemCount = Number(row.item_count) || 0;
+        const hasNotes =
+          typeof row.notes === 'string' && row.notes.trim().length > 0;
+        outOfRangeDays.push({
+          id: row.id,
+          dayDate: dayDateStr,
+          dayOrder: Number(row.day_order),
+          itemCount,
+          hasNotes,
+          hasData: itemCount > 0 || hasNotes,
+        });
+      }
+    }
+
+    const conflictingDays = outOfRangeDays.filter((d) => d.hasData);
+    if (conflictingDays.length > 0) {
+      const affectedDatesList = conflictingDays.map((d) => d.dayDate).join(', ');
+      const conflictErr = new Error(
+        `Cannot synchronize itinerary days to ${startDate} – ${endDate} because ${conflictingDays.length} itinerary day(s) outside the updated trip dates (${affectedDatesList}) still contain scheduled activities or notes. All existing itinerary data has been preserved.`
+      );
+      conflictErr.status = 409;
+      conflictErr.code = 'ITINERARY_OUTSIDE_RANGE_HAS_DATA';
+      conflictErr.details = {
+        tripId: trip.id,
+        startDate,
+        endDate,
+        conflictingDayCount: conflictingDays.length,
+        affectedDays: conflictingDays.map(({ hasData, ...safeDay }) => safeDay),
+      };
+      throw conflictErr;
+    }
+
+    const emptyOutOfRangeIds = outOfRangeDays.map((d) => d.id);
+    if (emptyOutOfRangeIds.length > 0) {
+      await client.query(
+        `DELETE FROM itinerary_days
+         WHERE trip_id = $1
+           AND id = ANY($2::uuid[])`,
+        [trip.id, emptyOutOfRangeIds]
+      );
+    }
+
+    // 2. Shift remaining in-range day_order values to a positive temporary offset to avoid uq_itinerary_days_trip_order collisions
     await client.query(
       `UPDATE itinerary_days
        SET day_order = day_order + 100000
@@ -195,7 +273,7 @@ export async function initializeTripItinerary(trip) {
       [trip.id]
     );
 
-    // Ensure every date in the trip range exists with temporarily offset order
+    // 3. Ensure every date in the trip range exists with temporarily offset order
     for (let idx = 0; idx < dateRange.length; idx += 1) {
       const dayDate = dateRange[idx];
       const tempOrder = 200000 + idx + 1;
@@ -209,7 +287,7 @@ export async function initializeTripItinerary(trip) {
       );
     }
 
-    // Reassign contiguous 1..N day_order ordered strictly by day_date ASC
+    // 4. Reassign contiguous 1..N day_order ordered strictly by day_date ASC
     const allDaysRes = await client.query(
       `SELECT id
        FROM itinerary_days
@@ -235,6 +313,13 @@ export async function initializeTripItinerary(trip) {
  * Fetches complete trip itinerary including ordered days, items, places, and exact cost totals.
  */
 export async function getTripItinerary(trip, accessRole = null) {
+  const tripStartDate = formatDateOnly(trip.startDate || trip.start_date);
+  const tripEndDate = formatDateOnly(trip.endDate || trip.end_date);
+  const tripRange = {
+    startDate: tripStartDate,
+    endDate: tripEndDate,
+  };
+
   const daysResult = await query(
     `SELECT
        id,
@@ -282,7 +367,7 @@ export async function getTripItinerary(trip, accessRole = null) {
   }
 
   const days = daysResult.rows.map((dayRow) =>
-    mapItineraryDayRow(dayRow, itemsByDayId.get(dayRow.id) || [])
+    mapItineraryDayRow(dayRow, itemsByDayId.get(dayRow.id) || [], tripRange)
   );
 
   const totalEstimatedCost = sumDecimalStrings(

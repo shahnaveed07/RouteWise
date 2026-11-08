@@ -39,6 +39,15 @@ export async function initializeTripItineraryHandler(req, res, next) {
       data,
     });
   } catch (err) {
+    if (err && err.status) {
+      return res.status(err.status).json({
+        status: 'error',
+        code: err.code || 'ITINERARY_INITIALIZATION_ERROR',
+        error: err.message,
+        message: err.message,
+        ...(err.details ? { details: err.details } : {}),
+      });
+    }
     return next(err);
   }
 }

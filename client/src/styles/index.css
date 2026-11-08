@@ -1167,6 +1167,63 @@ body {
   gap: 0.85rem;
 }
 
+.route-summary-mock {
+  background-color: #fffbeb;
+  border-color: #fcd34d;
+}
+
+.route-mock-banner {
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-sm);
+  background-color: #fef3c7;
+  border: 1px solid #f59e0b;
+  color: #92400e;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.84rem;
+}
+
+.route-mock-banner strong {
+  font-size: 0.88rem;
+  letter-spacing: 0.02em;
+}
+
+.itinerary-sync-conflict-banner {
+  padding: 1rem 1.2rem;
+  border-radius: var(--radius-sm);
+  background-color: #fffbeb;
+  border: 1px solid #f59e0b;
+  color: #78350f;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.itinerary-sync-conflict-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.itinerary-sync-conflict-text,
+.itinerary-sync-conflict-hint {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.itinerary-sync-conflict-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.86rem;
+}
+
+.itinerary-trip-switcher {
+  min-width: 240px;
+}
+
 .route-summary-error {
   background-color: var(--status-danger-bg);
   border-color: #fecaca;

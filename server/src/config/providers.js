@@ -30,7 +30,7 @@ export const PROVIDER_CONFIG = Object.freeze({
     attribution: {
       service: 'openrouteservice by HeiGIT',
       url: 'https://openrouteservice.org/',
-      text: 'Route directions by openrouteservice (HeiGIT) • Map data © OpenStreetMap contributors',
+      text: 'Route directions by openrouteservice.org by HeiGIT',
     },
     status: 'ACTIVE_PHASE_4',
   },

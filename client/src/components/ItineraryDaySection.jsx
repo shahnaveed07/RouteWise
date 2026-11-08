@@ -176,6 +176,14 @@ export default function ItineraryDaySection({
           <div className="itinerary-day-heading-row">
             <span className="itinerary-day-pill">Day {day.dayOrder}</span>
             <h3 className="itinerary-day-date">{day.dayDate}</h3>
+            {day.isOutsideTripRange && (
+              <span
+                className="coord-status-badge coord-status-unverified"
+                data-testid={`day-${day.dayOrder}-outside-range-badge`}
+              >
+                Outside Current Trip Dates
+              </span>
+            )}
             {isSelectedForMap && (
               <span className="coord-status-badge coord-status-verified">
                 Focused on Map

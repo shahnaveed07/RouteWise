@@ -1,22 +1,32 @@
 import { apiRequest } from './apiClient.jsx';
 
-export async function fetchTripItinerary(getAccessToken, tripId) {
+export async function fetchTripItinerary(
+  getAccessToken,
+  tripId,
+  { signal } = {}
+) {
   const response = await apiRequest(
     `/api/trips/${encodeURIComponent(tripId)}/itinerary`,
     {
       method: 'GET',
       getAccessToken,
+      signal,
     }
   );
   return response?.data;
 }
 
-export async function initializeTripItineraryRequest(getAccessToken, tripId) {
+export async function initializeTripItineraryRequest(
+  getAccessToken,
+  tripId,
+  { signal } = {}
+) {
   const response = await apiRequest(
     `/api/trips/${encodeURIComponent(tripId)}/itinerary/initialize`,
     {
       method: 'POST',
       getAccessToken,
+      signal,
     }
   );
   return response?.data;
@@ -134,7 +144,8 @@ export async function calculateDayRouteRequest(
   getAccessToken,
   tripId,
   dayId,
-  profile = 'driving-car'
+  profile = 'driving-car',
+  { signal } = {}
 ) {
   const response = await apiRequest(
     `/api/trips/${encodeURIComponent(tripId)}/itinerary/days/${encodeURIComponent(
@@ -144,6 +155,7 @@ export async function calculateDayRouteRequest(
       method: 'POST',
       body: { profile },
       getAccessToken,
+      signal,
     }
   );
   return response?.data;

@@ -310,7 +310,11 @@ export default function ItineraryMap({
         <span>
           Showing {visibleStops.length} geocoded activity stop
           {visibleStops.length === 1 ? '' : 's'}
-          {routeResult?.route ? ' • Active route line rendered' : ''}
+          {routeResult?.route
+            ? routeResult.route.isMock
+              ? ' • Simulated straight-line test route rendered'
+              : ' • Active road route line rendered'
+            : ''}
         </span>
         <span>
           Map tiles &copy;{' '}

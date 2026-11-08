@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import EmptyState from '../components/EmptyState.jsx';
 import ErrorState from '../components/ErrorState.jsx';
 import ItineraryDaySection from '../components/ItineraryDaySection.jsx';
@@ -9,6 +9,7 @@ import PageHeader from '../components/PageHeader.jsx';
 import RouteProfileSelector from '../components/RouteProfileSelector.jsx';
 import RouteSummary from '../components/RouteSummary.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
+import { fetchTrips } from '../services/apiClient.jsx';
 import {
   calculateDayRouteRequest,
   createItineraryItemRequest,
@@ -22,6 +23,7 @@ import {
 
 export default function ItineraryPage() {
   const { tripId } = useParams();
+  const navigate = useNavigate();
   const {
     currentUser,
     authReady,
@@ -31,6 +33,7 @@ export default function ItineraryPage() {
   } = useAuth();
 
   const [itineraryData, setItineraryData] = useState(null);
+  const [accessibleTrips, setAccessibleTrips] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [isInitializing, setIsInitializing] = useState(false);
@@ -41,8 +44,87 @@ export default function ItineraryPage() {
   const [routeError, setRouteError] = useState(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
   const [statusBanner, setStatusBanner] = useState(null);
+  const [syncConflict, setSyncConflict] = useState(null);
 
-  const didAutoInitRef = useRef(false);
+  const autoInitTripIdRef = useRef(null);
+  const loadRequestSeqRef = useRef(0);
+  const loadAbortRef = useRef(null);
+  const routeRequestSeqRef = useRef(0);
+  const routeAbortRef = useRef(null);
+
+  // Reset all trip-specific state immediately whenever tripId changes
+  useEffect(() => {
+    if (loadAbortRef.current) {
+      loadAbortRef.current.abort();
+      loadAbortRef.current = null;
+    }
+    if (routeAbortRef.current) {
+      routeAbortRef.current.abort();
+      routeAbortRef.current = null;
+    }
+    loadRequestSeqRef.current += 1;
+    routeRequestSeqRef.current += 1;
+    autoInitTripIdRef.current = null;
+
+    setItineraryData(null);
+    setSelectedDayId('ALL');
+    setRouteResult(null);
+    setRouteError(null);
+    setStatusBanner(null);
+    setSyncConflict(null);
+    setLoadError(null);
+    setIsInitializing(false);
+    setIsCalculatingRoute(false);
+  }, [tripId]);
+
+  // Cleanup any in-flight controllers on unmount
+  useEffect(() => {
+    return () => {
+      if (loadAbortRef.current) {
+        loadAbortRef.current.abort();
+      }
+      if (routeAbortRef.current) {
+        routeAbortRef.current.abort();
+      }
+    };
+  }, []);
+
+  // Load user's accessible trips so they can switch between trip itineraries without a full page reload
+  useEffect(() => {
+    if (!authReady || !isAuthenticated) {
+      setAccessibleTrips([]);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchTrips(getAccessToken)
+      .then((list) => {
+        if (!cancelled && Array.isArray(list)) {
+          setAccessibleTrips(list);
+        }
+      })
+      .catch(() => {
+        // Non-blocking: switcher simply stays hidden if listing fails
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, isAuthenticated, getAccessToken, tripId]);
+
+  const reconcileSelectedDayForData = useCallback((nextData) => {
+    const validDays = Array.isArray(nextData?.days) ? nextData.days : [];
+    setSelectedDayId((prevSelected) => {
+      if (validDays.length === 0) {
+        return 'ALL';
+      }
+      if (
+        prevSelected !== 'ALL' &&
+        validDays.some((d) => d.id === prevSelected)
+      ) {
+        return prevSelected;
+      }
+      return validDays[0].id;
+    });
+  }, []);
 
   const loadItinerary = useCallback(
     async ({ silent = false } = {}) => {
@@ -51,13 +133,31 @@ export default function ItineraryPage() {
         return;
       }
 
+      if (loadAbortRef.current) {
+        loadAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      loadAbortRef.current = controller;
+      const requestId = ++loadRequestSeqRef.current;
+      const requestedTripId = tripId;
+
       if (!silent) {
         setIsLoading(true);
       }
       setLoadError(null);
 
       try {
-        const data = await fetchTripItinerary(getAccessToken, tripId);
+        const data = await fetchTripItinerary(getAccessToken, requestedTripId, {
+          signal: controller.signal,
+        });
+
+        if (
+          loadRequestSeqRef.current !== requestId ||
+          controller.signal.aborted
+        ) {
+          return;
+        }
+
         const role = data?.trip?.accessRole || 'viewer';
         const canEdit = role === 'owner' || role === 'member';
 
@@ -66,32 +166,43 @@ export default function ItineraryPage() {
           Array.isArray(data.days) &&
           data.days.length === 0 &&
           canEdit &&
-          !didAutoInitRef.current
+          autoInitTripIdRef.current !== requestedTripId
         ) {
-          didAutoInitRef.current = true;
+          autoInitTripIdRef.current = requestedTripId;
           const initializedData = await initializeTripItineraryRequest(
             getAccessToken,
-            tripId
+            requestedTripId,
+            { signal: controller.signal }
           );
-          setItineraryData(initializedData);
-          if (initializedData?.days?.length > 0 && selectedDayId === 'ALL') {
-            setSelectedDayId(initializedData.days[0].id);
+
+          if (
+            loadRequestSeqRef.current !== requestId ||
+            controller.signal.aborted
+          ) {
+            return;
           }
+
+          setItineraryData(initializedData);
+          reconcileSelectedDayForData(initializedData);
         } else {
           setItineraryData(data);
-          if (data?.days?.length > 0 && selectedDayId === 'ALL') {
-            setSelectedDayId(data.days[0].id);
-          }
+          reconcileSelectedDayForData(data);
         }
       } catch (err) {
+        if (err && err.name === 'AbortError') {
+          return;
+        }
+        if (loadRequestSeqRef.current !== requestId) {
+          return;
+        }
         setLoadError(err.message || 'Unable to load trip itinerary.');
       } finally {
-        if (!silent) {
+        if (loadRequestSeqRef.current === requestId && !silent) {
           setIsLoading(false);
         }
       }
     },
-    [isAuthenticated, tripId, getAccessToken, selectedDayId]
+    [isAuthenticated, tripId, getAccessToken, reconcileSelectedDayForData]
   );
 
   useEffect(() => {
@@ -102,17 +213,24 @@ export default function ItineraryPage() {
     }
   }, [authReady, isAuthenticated, loadItinerary]);
 
-  const trip = itineraryData?.trip || null;
+  const trip =
+    itineraryData?.trip && itineraryData.trip.id === tripId
+      ? itineraryData.trip
+      : null;
   const days = useMemo(
-    () => (Array.isArray(itineraryData?.days) ? itineraryData.days : []),
-    [itineraryData]
+    () =>
+      trip && Array.isArray(itineraryData?.days) ? itineraryData.days : [],
+    [trip, itineraryData]
   );
-  const summary = itineraryData?.summary || {
-    dayCount: 0,
-    totalItems: 0,
-    totalEstimatedCost: '0.00',
-    isInitialized: false,
-  };
+  const summary =
+    trip && itineraryData?.summary
+      ? itineraryData.summary
+      : {
+          dayCount: 0,
+          totalItems: 0,
+          totalEstimatedCost: '0.00',
+          isInitialized: false,
+        };
 
   const accessRole = trip?.accessRole || 'viewer';
   const canEdit = accessRole === 'owner' || accessRole === 'member';
@@ -129,20 +247,43 @@ export default function ItineraryPage() {
     if (!canEdit || isInitializing) return;
     setIsInitializing(true);
     setStatusBanner(null);
+    setSyncConflict(null);
+
     try {
       const initialized = await initializeTripItineraryRequest(
         getAccessToken,
         tripId
       );
       setItineraryData(initialized);
-      if (initialized?.days?.length > 0 && selectedDayId === 'ALL') {
-        setSelectedDayId(initialized.days[0].id);
-      }
+      reconcileSelectedDayForData(initialized);
       setStatusBanner(
-        `Itinerary initialized with ${initialized?.days?.length || 0} days matching the trip date range.`
+        `Itinerary synchronized with ${
+          initialized?.days?.length || 0
+        } days matching ${initialized?.trip?.startDate} to ${
+          initialized?.trip?.endDate
+        }.`
       );
     } catch (err) {
-      setLoadError(err.message || 'Unable to initialize trip itinerary.');
+      if (
+        err?.statusCode === 409 ||
+        err?.code === 'ITINERARY_OUTSIDE_RANGE_HAS_DATA'
+      ) {
+        setSyncConflict({
+          message:
+            err.message ||
+            'Cannot synchronize itinerary days because one or more days outside the updated trip date range still contain activities or notes.',
+          code: err.code || 'ITINERARY_OUTSIDE_RANGE_HAS_DATA',
+          details: err.details || null,
+        });
+      } else if (!trip) {
+        setLoadError(err.message || 'Unable to initialize trip itinerary.');
+      } else {
+        setSyncConflict({
+          message: err.message || 'Unable to synchronize itinerary days.',
+          code: err.code || 'ITINERARY_SYNC_ERROR',
+          details: err.details || null,
+        });
+      }
     } finally {
       setIsInitializing(false);
     }
@@ -150,16 +291,17 @@ export default function ItineraryPage() {
 
   const handleSaveNotes = async (dayId, notes) => {
     await updateDayNotesRequest(getAccessToken, tripId, dayId, notes);
+    setSyncConflict(null);
     await loadItinerary({ silent: true });
     setStatusBanner('Day notes saved to PostgreSQL.');
   };
 
   const handleCreateItem = async (dayId, payload) => {
     await createItineraryItemRequest(getAccessToken, tripId, dayId, payload);
-    // Clear stale route if modifying the routed day
     if (routeResult && routeResult.dayId === dayId) {
       setRouteResult(null);
     }
+    setSyncConflict(null);
     await loadItinerary({ silent: true });
     setSelectedDayId(dayId);
     setStatusBanner(`Activity "${payload.title}" added to itinerary.`);
@@ -176,6 +318,7 @@ export default function ItineraryPage() {
     if (routeResult && routeResult.dayId === dayId) {
       setRouteResult(null);
     }
+    setSyncConflict(null);
     await loadItinerary({ silent: true });
     setStatusBanner('Activity updated in PostgreSQL.');
   };
@@ -185,6 +328,7 @@ export default function ItineraryPage() {
     if (routeResult && routeResult.dayId === dayId) {
       setRouteResult(null);
     }
+    setSyncConflict(null);
     await loadItinerary({ silent: true });
     setStatusBanner('Activity removed from itinerary.');
   };
@@ -210,6 +354,14 @@ export default function ItineraryPage() {
 
     if (!dayToRoute) return;
 
+    if (routeAbortRef.current) {
+      routeAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    routeAbortRef.current = controller;
+    const routeReqId = ++routeRequestSeqRef.current;
+    const requestedTripId = tripId;
+
     setSelectedDayId(dayToRoute.id);
     setIsCalculatingRoute(true);
     setRouteError(null);
@@ -218,18 +370,36 @@ export default function ItineraryPage() {
     try {
       const result = await calculateDayRouteRequest(
         getAccessToken,
-        tripId,
+        requestedTripId,
         dayToRoute.id,
-        selectedProfile
+        selectedProfile,
+        { signal: controller.signal }
       );
-      setRouteResult(result);
+      if (
+        routeRequestSeqRef.current !== routeReqId ||
+        controller.signal.aborted
+      ) {
+        return;
+      }
+      setRouteResult({
+        ...result,
+        tripId: requestedTripId,
+      });
     } catch (err) {
+      if (err && err.name === 'AbortError') {
+        return;
+      }
+      if (routeRequestSeqRef.current !== routeReqId) {
+        return;
+      }
       setRouteResult(null);
       setRouteError(
         err.message || 'Unable to calculate multi-stop route for this day.'
       );
     } finally {
-      setIsCalculatingRoute(false);
+      if (routeRequestSeqRef.current === routeReqId) {
+        setIsCalculatingRoute(false);
+      }
     }
   };
 
@@ -266,7 +436,7 @@ export default function ItineraryPage() {
     );
   }
 
-  if (isLoading) {
+  if (isLoading && !trip) {
     return (
       <LoadingState message="Loading day-wise itinerary from PostgreSQL..." />
     );
@@ -306,13 +476,46 @@ export default function ItineraryPage() {
     ? `Day ${activeDayForRouting.dayOrder} (${activeDayForRouting.dayDate})`
     : 'No Day Selected';
 
+  const affectedConflictDays = Array.isArray(syncConflict?.details?.affectedDays)
+    ? syncConflict.details.affectedDays
+    : [];
+
   return (
-    <div className="itinerary-page">
+    <div className="itinerary-page" data-trip-id={trip.id}>
       <PageHeader
         title={`${trip.title} — Day-Wise Itinerary`}
         subtitle={`${trip.destinationName} • ${trip.startDate} to ${trip.endDate}`}
         actions={
           <>
+            {accessibleTrips.length > 1 && (
+              <div className="itinerary-trip-switcher">
+                <label
+                  htmlFor="itinerary-trip-switch-select"
+                  className="sr-only"
+                >
+                  Switch Trip Itinerary
+                </label>
+                <select
+                  id="itinerary-trip-switch-select"
+                  className="form-select"
+                  aria-label="Switch Trip Itinerary"
+                  data-testid="itinerary-trip-switcher"
+                  value={trip.id}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    if (nextId && nextId !== trip.id) {
+                      navigate(`/trips/${nextId}/itinerary`);
+                    }
+                  }}
+                >
+                  {accessibleTrips.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      Switch Trip: {t.title} ({t.startDate} – {t.endDate})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <Link
               to={`/trips/${trip.id}`}
               className="btn btn-secondary"
@@ -326,6 +529,7 @@ export default function ItineraryPage() {
                 className="btn btn-secondary"
                 onClick={handleManualInitialize}
                 disabled={isInitializing}
+                data-testid="sync-itinerary-days-btn"
               >
                 {isInitializing ? 'Syncing Days...' : 'Sync Itinerary Days'}
               </button>
@@ -333,6 +537,51 @@ export default function ItineraryPage() {
           </>
         }
       />
+
+      {syncConflict && (
+        <div
+          className="itinerary-sync-conflict-banner"
+          role="alert"
+          data-testid="itinerary-sync-conflict-banner"
+        >
+          <div className="itinerary-sync-conflict-header">
+            <strong>
+              Date-Range Synchronization Conflict — Existing Data Preserved (
+              {syncConflict.code})
+            </strong>
+            <button
+              type="button"
+              className="btn btn-secondary btn-xs"
+              onClick={() => setSyncConflict(null)}
+            >
+              Dismiss Notice
+            </button>
+          </div>
+          <p className="itinerary-sync-conflict-text">{syncConflict.message}</p>
+          {affectedConflictDays.length > 0 && (
+            <ul
+              className="itinerary-sync-conflict-list"
+              aria-label="Out-of-range itinerary days with preserved data"
+            >
+              {affectedConflictDays.map((d) => (
+                <li key={d.id || d.dayDate}>
+                  <strong>
+                    Day {d.dayOrder} ({d.dayDate})
+                  </strong>
+                  : {d.itemCount}{' '}
+                  {d.itemCount === 1 ? 'scheduled activity' : 'scheduled activities'}
+                  {d.hasNotes ? ' + saved day notes' : ''} (outside{' '}
+                  {trip.startDate} – {trip.endDate})
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="itinerary-sync-conflict-hint">
+            To complete date synchronization, delete or move the activities and clear the notes on the out-of-range day(s) below (or extend the trip dates on Trip Details), then click{' '}
+            <strong>Sync Itinerary Days</strong> again.
+          </p>
+        </div>
+      )}
 
       {statusBanner && (
         <div className="form-alert form-alert-success" role="status">
@@ -443,10 +692,12 @@ export default function ItineraryPage() {
         )}
 
         <RouteSummary
-          routeResult={routeResult}
+          routeResult={
+            routeResult && routeResult.tripId === trip.id ? routeResult : null
+          }
           routeError={routeError}
           dayLabel={
-            routeResult
+            routeResult && routeResult.tripId === trip.id
               ? `Day ${routeResult.dayOrder} (${routeResult.dayDate})`
               : routingDayLabel
           }
@@ -460,7 +711,9 @@ export default function ItineraryPage() {
           trip={trip}
           days={days}
           selectedDayId={selectedDayId}
-          routeResult={routeResult}
+          routeResult={
+            routeResult && routeResult.tripId === trip.id ? routeResult : null
+          }
         />
       </section>
 

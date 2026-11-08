@@ -8,17 +8,79 @@ const PLACEHOLDER_KEYS = new Set([
   'placeholder',
 ]);
 
-export function isOpenRouteServiceConfigured() {
-  if (
-    process.env.NODE_ENV !== 'production' &&
-    process.env.ROUTEWISE_ENABLE_LOCAL_E2E_AUTH === 'true' &&
-    process.env.ROUTEWISE_ENABLE_LOCAL_E2E_ORS_MOCK === 'true'
-  ) {
+export function isLocalE2eMockRoutingAllowed(env = process.env) {
+  return Boolean(
+    env &&
+      env.NODE_ENV !== 'production' &&
+      env.ROUTEWISE_ENABLE_LOCAL_E2E_AUTH === 'true' &&
+      env.ROUTEWISE_ENABLE_LOCAL_E2E_ORS_MOCK === 'true'
+  );
+}
+
+export function isOpenRouteServiceConfigured(env = process.env) {
+  if (isLocalE2eMockRoutingAllowed(env)) {
     return true;
   }
 
-  const rawKey = (process.env.OPENROUTESERVICE_API_KEY || '').trim();
+  const rawKey = (env?.OPENROUTESERVICE_API_KEY || '').trim();
   return rawKey.length > 0 && !PLACEHOLDER_KEYS.has(rawKey.toLowerCase());
+}
+
+export function formatDistanceKm(distanceMeters) {
+  if (typeof distanceMeters !== 'number' || !Number.isFinite(distanceMeters)) {
+    return '0.0 km';
+  }
+  if (distanceMeters < 1000) {
+    return `${Math.round(distanceMeters)} m`;
+  }
+  return `${(distanceMeters / 1000).toFixed(1)} km`;
+}
+
+export function formatDurationHuman(durationSeconds) {
+  if (typeof durationSeconds !== 'number' || !Number.isFinite(durationSeconds)) {
+    return '0 min';
+  }
+  const totalMinutes = Math.max(1, Math.round(durationSeconds / 60));
+  if (totalMinutes < 60) {
+    return `${totalMinutes} min`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  return mins > 0 ? `${hours} hr ${mins} min` : `${hours} hr`;
+}
+
+export function describeRouteSummaryState(route) {
+  if (!route) {
+    return null;
+  }
+  const isMock = Boolean(route.isMock) || route.source === 'LOCAL_E2E_MOCK';
+  const attributionText = isMock
+    ? 'Source: Local E2E Simulated Geometry (LOCAL_E2E_MOCK) — Not provided by openrouteservice'
+    : typeof route.attribution === 'string'
+    ? route.attribution
+    : route.attribution?.text ||
+      'Route directions by openrouteservice.org by HeiGIT';
+  const attributionUrl = isMock
+    ? null
+    : typeof route.attribution === 'object' && route.attribution?.url
+    ? route.attribution.url
+    : 'https://openrouteservice.org/';
+
+  return {
+    isMock,
+    source: route.source || (isMock ? 'LOCAL_E2E_MOCK' : 'OPENROUTESERVICE'),
+    bannerHeading: isMock
+      ? 'SIMULATED TEST ROUTE — NOT REAL ROAD DIRECTIONS'
+      : null,
+    distanceDisplay: isMock
+      ? 'Simulated (Not Real Road Distance)'
+      : formatDistanceKm(route.distanceMeters),
+    durationDisplay: isMock
+      ? 'Simulated (Not Real Travel Time)'
+      : formatDurationHuman(route.durationSeconds),
+    attributionText,
+    attributionUrl,
+  };
 }
 
 /**
@@ -73,7 +135,7 @@ export function extractRouteStopsFromItems(items = []) {
 function buildLocalE2eControlledRoute({ profile, stops, skippedItems, warnings }) {
   const coordinates = stops.map((stop) => [stop.longitude, stop.latitude]);
 
-  // Approximate great-circle distance across stops for deterministic local E2E verification
+  // Approximate straight-line distance across stops for deterministic local E2E test harness only
   let totalDistanceMeters = 0;
   for (let i = 1; i < stops.length; i += 1) {
     const prev = stops[i - 1];
@@ -100,6 +162,10 @@ function buildLocalE2eControlledRoute({ profile, stops, skippedItems, warnings }
   );
 
   return {
+    isMock: true,
+    source: 'LOCAL_E2E_MOCK',
+    provider: 'local-e2e-simulated',
+    notice: 'SIMULATED TEST ROUTE — NOT REAL ROAD DIRECTIONS',
     profile,
     distanceMeters: totalDistanceMeters,
     durationSeconds,
@@ -111,14 +177,18 @@ function buildLocalE2eControlledRoute({ profile, stops, skippedItems, warnings }
     stops: stops.map(({ orsCoordinate, ...rest }) => rest),
     skippedItems,
     warnings,
-    attribution: PROVIDER_CONFIG.openRouteService.attribution,
+    attribution: null,
   };
 }
 
 /**
  * Calculates a multi-stop route for an itinerary day using openrouteservice (HeiGIT).
  */
-export async function calculateDayRoute({ items = [], profile = 'driving-car' }) {
+export async function calculateDayRoute({
+  items = [],
+  profile = 'driving-car',
+  env = process.env,
+}) {
   const { stops, skippedItems } = extractRouteStopsFromItems(items);
 
   if (stops.length < 2) {
@@ -144,11 +214,7 @@ export async function calculateDayRoute({ items = [], profile = 'driving-car' })
     );
   }
 
-  if (
-    process.env.NODE_ENV !== 'production' &&
-    process.env.ROUTEWISE_ENABLE_LOCAL_E2E_AUTH === 'true' &&
-    process.env.ROUTEWISE_ENABLE_LOCAL_E2E_ORS_MOCK === 'true'
-  ) {
+  if (isLocalE2eMockRoutingAllowed(env)) {
     return buildLocalE2eControlledRoute({
       profile,
       stops,
@@ -157,7 +223,7 @@ export async function calculateDayRoute({ items = [], profile = 'driving-car' })
     });
   }
 
-  if (!isOpenRouteServiceConfigured()) {
+  if (!isOpenRouteServiceConfigured(env)) {
     const error = new Error(
       'Multi-stop route calculation is currently unavailable because OPENROUTESERVICE_API_KEY is not configured on the server.'
     );
@@ -166,7 +232,7 @@ export async function calculateDayRoute({ items = [], profile = 'driving-car' })
     throw error;
   }
 
-  const apiKey = process.env.OPENROUTESERVICE_API_KEY.trim();
+  const apiKey = env.OPENROUTESERVICE_API_KEY.trim();
   const baseUrl = PROVIDER_CONFIG.openRouteService.baseUrl.replace(/\/+$/, '');
   const endpoint = `${baseUrl}/directions/${encodeURIComponent(profile)}/geojson`;
   const orsCoordinates = stops.map((stop) => stop.orsCoordinate);
@@ -272,6 +338,9 @@ export async function calculateDayRoute({ items = [], profile = 'driving-car' })
   }
 
   return {
+    isMock: false,
+    source: 'OPENROUTESERVICE',
+    provider: 'openrouteservice',
     profile,
     distanceMeters:
       typeof summary.distance === 'number' && Number.isFinite(summary.distance)
