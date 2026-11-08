@@ -2,6 +2,7 @@ import { adminAuth } from '../config/firebase-admin.js';
 import { getOrCreateUser } from '../services/userService.js';
 
 const DEV_E2E_TOKEN = 'e2e-local-playwright-token';
+const DEV_E2E_INVITEE_TOKEN = 'e2e-local-playwright-invitee-token';
 
 function isLoopbackAddress(ip = '') {
   return (
@@ -35,7 +36,7 @@ function isLoopbackHeaderHost(rawValue = '') {
  * Disabled by default. Requires:
  * 1. NODE_ENV !== 'production'
  * 2. ROUTEWISE_ENABLE_LOCAL_E2E_AUTH === 'true'
- * 3. Exact DEV_E2E_TOKEN match
+ * 3. Exact DEV_E2E_TOKEN or DEV_E2E_INVITEE_TOKEN match
  * 4. Loopback socket/request IP address
  * 5. Loopback Host and Origin headers (if present)
  */
@@ -46,7 +47,7 @@ export function isLocalE2EBypassAllowed(token, req, env = process.env) {
   if (env.ROUTEWISE_ENABLE_LOCAL_E2E_AUTH !== 'true') {
     return false;
   }
-  if (token !== DEV_E2E_TOKEN) {
+  if (token !== DEV_E2E_TOKEN && token !== DEV_E2E_INVITEE_TOKEN) {
     return false;
   }
   const remoteIp = req?.ip || req?.socket?.remoteAddress || '';
@@ -69,10 +70,19 @@ export function isLocalE2EBypassAllowed(token, req, env = process.env) {
 export function createRequireAuth({
   verifyToken = (token, req) => {
     if (isLocalE2EBypassAllowed(token, req, process.env)) {
+      if (token === DEV_E2E_INVITEE_TOKEN) {
+        return Promise.resolve({
+          uid: 'e2e-playwright-invitee',
+          email: 'e2e.invitee@routewise.test',
+          name: 'RouteWise E2E Invitee',
+          email_verified: true,
+        });
+      }
       return Promise.resolve({
         uid: 'e2e-playwright-verifier',
         email: 'e2e.verifier@routewise.test',
         name: 'RouteWise E2E Verifier',
+        email_verified: true,
       });
     }
     return adminAuth.verifyIdToken(token);
@@ -115,10 +125,16 @@ export function createRequireAuth({
       });
     }
 
+    const emailVerified =
+      decodedToken.email_verified !== undefined
+        ? Boolean(decodedToken.email_verified)
+        : Boolean(decodedToken.emailVerified ?? true);
+
     req.user = {
       uid: decodedToken.uid,
       email: decodedToken.email,
       name: decodedToken.name || '',
+      emailVerified,
     };
 
     try {

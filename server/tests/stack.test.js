@@ -257,6 +257,10 @@ test('workspace enforces React .jsx in client/src, .js in server/src, plain SQL 
     fs.existsSync(path.join(rootDir, 'server/database/migrations/0003_expense_settlement_audit.sql')),
     true
   );
+  assert.equal(
+    fs.existsSync(path.join(rootDir, 'server/database/migrations/0004_trip_invitations.sql')),
+    true
+  );
 
   // Legacy Prisma directory & schema retired
   assert.equal(fs.existsSync(path.join(rootDir, 'server/prisma/schema.prisma')), false);

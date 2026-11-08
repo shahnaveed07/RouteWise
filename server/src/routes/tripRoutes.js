@@ -10,6 +10,8 @@ import {
 } from '../controllers/tripController.js';
 import itineraryRoutes from './itineraryRoutes.js';
 import expenseRoutes from './expenseRoutes.js';
+import memberRoutes from './memberRoutes.js';
+import { tripInvitationRoutes } from './invitationRoutes.js';
 
 const router = Router();
 
@@ -19,6 +21,8 @@ router.get('/', handleListTrips);
 router.post('/', handleCreateTrip);
 router.use('/:tripId/itinerary', itineraryRoutes);
 router.use('/:tripId/expenses', expenseRoutes);
+router.use('/:tripId/members', memberRoutes);
+router.use('/:tripId/invitations', tripInvitationRoutes);
 router.get('/:tripId', requireTripAccess, handleGetTrip);
 router.patch('/:tripId', requireTripAccess, requireTripOwner, handleUpdateTrip);
 router.delete('/:tripId', requireTripAccess, requireTripOwner, handleDeleteTrip);

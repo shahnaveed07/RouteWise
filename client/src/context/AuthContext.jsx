@@ -15,16 +15,21 @@ export const googleAuthProvider = new GoogleAuthProvider();
 
 const DEV_E2E_STORAGE_KEY = 'ROUTEWISE_DEV_E2E_AUTH';
 const DEV_E2E_TOKEN = 'e2e-local-playwright-token';
+const DEV_E2E_INVITEE_TOKEN = 'e2e-local-playwright-invitee-token';
 
-function isDevLoopbackE2EEnabled() {
-  if (typeof window === 'undefined') return false;
-  if (import.meta.env && import.meta.env.PROD) return false;
+function getDevLoopbackE2EToken() {
+  if (typeof window === 'undefined') return null;
+  if (import.meta.env && import.meta.env.PROD) return null;
   const host = window.location?.hostname || '';
   const isLocal = host === 'localhost' || host === '127.0.0.1';
+  if (!isLocal) return null;
   try {
-    return isLocal && window.localStorage.getItem(DEV_E2E_STORAGE_KEY) === '1';
+    const val = window.localStorage.getItem(DEV_E2E_STORAGE_KEY);
+    if (val === '1') return DEV_E2E_TOKEN;
+    if (val === 'invitee') return DEV_E2E_INVITEE_TOKEN;
+    return null;
   } catch (_err) {
-    return false;
+    return null;
   }
 }
 
@@ -90,20 +95,24 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      if (isDevLoopbackE2EEnabled()) {
+      const e2eToken = getDevLoopbackE2EToken();
+      if (e2eToken) {
         try {
           const res = await fetch('/api/auth/me', {
             method: 'GET',
             headers: {
               Accept: 'application/json',
-              Authorization: `Bearer ${DEV_E2E_TOKEN}`,
+              Authorization: `Bearer ${e2eToken}`,
             },
           });
           if (!isCancelled && res.ok) {
+            const payload = await res.json().catch(() => null);
+            const verifiedUser = payload?.user;
             setCurrentUser({
-              id: 'e2e-playwright-verifier',
-              fullName: 'RouteWise E2E Verifier',
-              email: 'e2e.verifier@routewise.test',
+              id: verifiedUser?.id || (e2eToken === DEV_E2E_INVITEE_TOKEN ? 'e2e-playwright-invitee' : 'e2e-playwright-verifier'),
+              uid: verifiedUser?.uid || (e2eToken === DEV_E2E_INVITEE_TOKEN ? 'e2e-playwright-invitee' : 'e2e-playwright-verifier'),
+              fullName: verifiedUser?.fullName || (e2eToken === DEV_E2E_INVITEE_TOKEN ? 'RouteWise E2E Invitee' : 'RouteWise E2E Verifier'),
+              email: verifiedUser?.email || (e2eToken === DEV_E2E_INVITEE_TOKEN ? 'e2e.invitee@routewise.test' : 'e2e.verifier@routewise.test'),
               roleLabel: 'Authenticated E2E Session',
               isDemo: false,
               isAuthenticated: true,
@@ -186,8 +195,8 @@ export function AuthProvider({ children }) {
     if (auth.currentUser) {
       return auth.currentUser.getIdToken();
     }
-    if (currentUser.authMode === 'dev_e2e' && isDevLoopbackE2EEnabled()) {
-      return DEV_E2E_TOKEN;
+    if (currentUser.authMode === 'dev_e2e') {
+      return getDevLoopbackE2EToken();
     }
     return null;
   }, [currentUser.isDemo, currentUser.isAuthenticated, currentUser.authMode]);

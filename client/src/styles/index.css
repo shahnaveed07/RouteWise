@@ -3017,4 +3017,217 @@ body {
   }
 }
 
+/* Phase 6: Trip Collaboration, Invitations & Member Role Management */
+.members-role-summary-card {
+  margin-bottom: 1.25rem;
+}
+
+.members-role-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.members-role-explanation {
+  margin: 0.45rem 0 0;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+
+.members-count-summary {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.members-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.members-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.members-side-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.members-list-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.member-row-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  background-color: var(--bg-canvas);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.member-row-owner {
+  background-color: #f8fafc;
+  border-color: var(--brand-primary);
+}
+
+.member-row-info {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.member-row-name {
+  font-size: 0.96rem;
+  color: var(--text-primary);
+}
+
+.member-row-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.member-row-role-note {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+.member-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.member-owner-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.empty-inline-note {
+  margin: 0;
+  padding: 1rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-canvas);
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+}
+
+.created-invitation-box {
+  margin-top: 1rem;
+  padding: 0.95rem 1rem;
+  background-color: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.created-invitation-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #065f46;
+}
+
+.created-invitation-subtext {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #047857;
+}
+
+.created-invitation-link-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.created-invitation-link-row .form-input {
+  flex: 1;
+  min-width: 200px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  background-color: #ffffff;
+}
+
+.invitations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.invitation-row-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.75rem 0.95rem;
+  background-color: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.invitation-row-main {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.invitation-row-email {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.invitation-row-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.invitation-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.invitation-response-card {
+  max-width: 680px;
+}
+
+@media (max-width: 960px) {
+  .members-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 

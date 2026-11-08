@@ -24,6 +24,8 @@ export default function ParticipantBalanceCard({
       ? 'Active Member'
       : tripRole === 'viewer'
       ? 'Viewer'
+      : tripRole === 'former_member'
+      ? 'Former Member (Inactive)'
       : 'Participant';
 
   let statusLabel = 'All Shares Settled';

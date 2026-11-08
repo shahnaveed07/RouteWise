@@ -1,5 +1,6 @@
 import express from 'express';
 import healthRoutes from './routes/healthRoutes.js';
+import invitationResponseRoutes from './routes/invitationRoutes.js';
 import locationRoutes from './routes/locationRoutes.js';
 import tripRoutes from './routes/tripRoutes.js';
 import weatherRoutes from './routes/weatherRoutes.js';
@@ -20,8 +21,11 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   });
 });
 
-// Protected Trip CRUD endpoints
+// Protected Trip CRUD & collaboration endpoints
 app.use('/api/trips', tripRoutes);
+
+// Protected Trip Invitation response endpoints (/api/trip-invitations/accept, /decline)
+app.use('/api/trip-invitations', invitationResponseRoutes);
 
 // Protected Open-Meteo Geocoding & Weather adapter endpoints
 app.use('/api/locations', locationRoutes);

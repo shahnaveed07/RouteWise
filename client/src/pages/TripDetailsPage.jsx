@@ -198,10 +198,16 @@ export default function TripDetailsPage() {
   );
   const roleLabel =
     trip.accessRole === 'owner'
-      ? 'Owner (Full Access)'
+      ? 'Owner (Full Control & Member Management)'
       : trip.accessRole === 'member'
-        ? 'Member (Read-Only Trip Details)'
+        ? 'Member (Can Edit Itinerary & Expenses)'
         : 'Viewer (Read-Only)';
+  const roleExplanation =
+    trip.accessRole === 'owner'
+      ? 'Owner: Full trip control, member management, and trip metadata.'
+      : trip.accessRole === 'member'
+        ? 'Member: Can edit itinerary and expenses; cannot manage members or edit/delete trip metadata.'
+        : 'Viewer: Read-only access.';
 
   return (
     <div>
@@ -226,6 +232,13 @@ export default function TripDetailsPage() {
               data-testid="open-expenses-btn"
             >
               Trip Budget &amp; Expenses
+            </Link>
+            <Link
+              to={`/trips/${trip.id}/members`}
+              className="btn btn-secondary"
+              data-testid="open-members-btn"
+            >
+              {isOwner ? 'Manage Members' : 'Trip Members'}
             </Link>
             {isOwner && !isEditing && (
               <>
@@ -271,7 +284,7 @@ export default function TripDetailsPage() {
       <ConfirmDialog
         isOpen={isDeleteDialogOpen}
         title="Delete Trip?"
-        message={`Are you sure you want to permanently delete "${trip.title}" (${trip.destinationName})? Dependent itinerary days, members, and expense records will also be removed via PostgreSQL ON DELETE CASCADE.`}
+        message={`Are you sure you want to permanently delete "${trip.title}" (${trip.destinationName})? Dependent itinerary days, members, invitations, and expense records will also be removed via PostgreSQL ON DELETE CASCADE.`}
         confirmLabel={isDeleting ? 'Deleting...' : 'Delete Permanently'}
         cancelLabel="Cancel"
         onConfirm={handleDeleteTrip}
@@ -302,7 +315,10 @@ export default function TripDetailsPage() {
           <section className="card trip-details-card" aria-label="Trip summary details">
             <div className="trip-details-top">
               <div className="trip-badges-row">
-                <span className={`role-badge role-badge-${trip.accessRole || 'owner'}`}>
+                <span
+                  className={`role-badge role-badge-${trip.accessRole || 'owner'}`}
+                  data-testid="trip-details-role-badge"
+                >
                   {roleLabel}
                 </span>
                 <span
@@ -317,11 +333,9 @@ export default function TripDetailsPage() {
                     : 'Destination Coordinates Not Confirmed'}
                 </span>
               </div>
-              {!isOwner && (
-                <span className="readonly-note">
-                  Only the trip owner can edit or delete trip metadata.
-                </span>
-              )}
+              <span className="readonly-note" data-testid="trip-details-role-note">
+                {roleExplanation}
+              </span>
             </div>
 
             <dl className="trip-details-grid">
